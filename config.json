@@ -64,7 +64,8 @@
     "user_name": "徐磊",
     "wiki_space_id": "my_library",
     "bot_as": "bot",
-    "user_as": "user"
+    "user_as": "user",
+    "bot_app_id": "cli_aae913b2d7f89cba"
   },
 
   "llm": {
