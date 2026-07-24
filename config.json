@@ -1,0 +1,79 @@
+{
+  "report": {
+    "name": "AI+Cloud 每日早报",
+    "bjt_hour": 12
+  },
+
+  "sources": {
+    "rss": [
+      {
+        "name": "36氪",
+        "url": "https://36kr.com/feed",
+        "max_items": 20
+      },
+      {
+        "name": "钛媒体",
+        "url": "https://www.tmtpost.com/rss.xml",
+        "max_items": 20
+      }
+    ],
+    "web_search": {
+      "enabled": true,
+      "queries": [
+        "site:36kr.com AI 大模型 2026",
+        "site:jiqizhixin.com AI 大模型 2026",
+        "site:leiphone.com AI 云计算 2026",
+        "site:geekpark.net AI Agent 2026",
+        "site:mp.weixin.qq.com Founder Park 大模型 2026",
+        "site:mp.weixin.qq.com AI科技评论 2026",
+        "site:thepaper.cn AI 人工智能 2026",
+        "site:huxiu.com AI 企业服务 2026"
+      ],
+      "max_results_per_query": 3
+    },
+    "podcast": {
+      "enabled": true,
+      "sources": ["硅谷101", "42章经", "乱翻书"],
+      "max_results_per_source": 3
+    }
+  },
+
+  "keywords": {
+    "include": [
+      "AI", "人工智能", "大模型", "LLM",
+      "云计算", "云服务",
+      "MaaS", "模型即服务",
+      "API", "API经济",
+      "算力", "GPU", "芯片",
+      "智能体", "Agent",
+      "具身智能", "机器人",
+      "多模态", "推理",
+      "AI基础设施", "AI infra",
+      "AI应用", "AI产品",
+      "AI销售", "GTM",
+      "OpenAI", "DeepSeek", "Anthropic",
+      "微软", "谷歌", "Amazon", "AWS",
+      "融资", "投资",
+      "智能驾驶", "自动驾驶"
+    ]
+  },
+
+  "feishu": {
+    "chat_id": "oc_579467102d78db1d5ab0291a43f1ce41",
+    "user_open_id": "ou_580becede77557e673e9c79ae959b264",
+    "user_name": "徐磊",
+    "wiki_space_id": "my_library",
+    "bot_as": "bot",
+    "user_as": "user"
+  },
+
+  "llm": {
+    "api_base": "https://api.deepseek.com/anthropic",
+    "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+    "model": "deepseek-v4-flash[1M]",
+    "max_tokens": 16384,
+    "temperature": 0.3,
+    "max_retries": 2,
+    "timeout_seconds": 120
+  }
+}

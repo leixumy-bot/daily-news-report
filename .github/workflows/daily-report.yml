@@ -1,0 +1,65 @@
+name: AI+Cloud 每日早报
+
+on:
+  # 每天北京时间 11:00 自动运行 (UTC 03:00)
+  schedule:
+    - cron: '0 3 * * *'
+  # 也支持手动触发
+  workflow_dispatch:
+    inputs:
+      date:
+        description: '报告日期 (YYYY-MM-DD)，留空为当天'
+        required: false
+        type: string
+      dry_run:
+        description: '仅测试，不推送飞书'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: daily-news-report
+  cancel-in-progress: false
+
+jobs:
+  build-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install ddgs
+
+      - name: Run daily report
+        env:
+          # LLM (DeepSeek via Anthropic protocol)
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL || 'https://api.deepseek.com/anthropic' }}
+
+          # Feishu bot credentials
+          LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
+          LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
+
+          # CI mode flag
+          CI: "true"
+
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            ARGS="$ARGS --date ${{ github.event.inputs.date }}"
+          fi
+          python3 daily_report.py $ARGS

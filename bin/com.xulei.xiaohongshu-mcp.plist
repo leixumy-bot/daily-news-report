@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.xulei.xiaohongshu-mcp</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/xulei/daily-news-report/bin/xiaohongshu-mcp-darwin-arm64</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/xulei/daily-news-report</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/xiaohongshu-mcp.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/xiaohongshu-mcp.err.log</string>
+</dict>
+</plist>
