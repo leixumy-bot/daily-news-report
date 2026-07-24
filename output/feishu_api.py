@@ -98,8 +98,18 @@ class FeishuAPI:
     def _build_card(self, markdown: str) -> dict:
         """Convert markdown to Feishu interactive card format.
 
-        Splits content by --- to create card sections if needed.
+        Handles @mentions: converts `<at user_id="ou_xxx">name</at>` to
+        Feishu card format `<at id=ou_xxx></at>`.
         """
+        import re
+
+        # Convert lark-cli @mention to card format
+        markdown = re.sub(
+            r'<at user_id="([^"]+)"[^>]*>[^<]*</at>',
+            r'<at id=\1></at>',
+            markdown,
+        )
+
         lines = markdown.split("\n")
 
         # Extract title from first # heading
@@ -107,12 +117,21 @@ class FeishuAPI:
         for line in lines:
             if line.startswith("# "):
                 title = line[2:].strip()
+
+        # Extract @mention line and prepend to first element
+        at_mention = ""
+        for l in lines:
+            if l.startswith("<at "):
+                at_mention = l.strip()
                 break
+
+        # Remove title line and @mention line from card body
+        content_lines = [l for l in lines if not l.startswith("# ") and not l.startswith("<at ")]
 
         elements = []
         current_md = []
 
-        for line in lines:
+        for line in content_lines:
             if line.strip() == "---":
                 if current_md:
                     elements.append(
@@ -124,8 +143,12 @@ class FeishuAPI:
                 current_md.append(line)
 
         if current_md:
+            content = "\n".join(current_md).strip()
+            # Prepend @mention to first element if available
+            if at_mention and not elements:
+                content = at_mention + "\n\n" + content
             elements.append(
-                {"tag": "markdown", "content": "\n".join(current_md).strip()}
+                {"tag": "markdown", "content": content}
             )
 
         # Remove trailing hr
