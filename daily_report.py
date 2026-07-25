@@ -270,17 +270,22 @@ def main():
     # ── 5. FORMAT + OUTPUT ──
     logger.info("[5/5] 格式化 + 飞书输出...")
     from processors.format import (
-        build_group_message,
+        build_curated_message,
+        build_appendix_message,
         build_kb_document,
     )
 
-    # Format (KB doc link will be updated after creation for follow-up message)
-    group_msg = build_group_message(
+    # Format curated message (Message 1)
+    group_msg = build_curated_message(
         summaries=summaries,
-        all_items=relevant,
-        appendix_url="",
         user_name=config.get("feishu", {}).get("user_name", ""),
         user_open_id=config.get("feishu", {}).get("user_open_id", ""),
+    )
+
+    # Format appendix message (Message 2)
+    appendix_msg = build_appendix_message(
+        all_items=all_items,
+        date_str=report_date,
     )
 
     kb_doc = build_kb_document(
@@ -292,17 +297,19 @@ def main():
     # Save locally
     output_dir = HERE / "outputs"
     output_dir.mkdir(exist_ok=True)
-    (output_dir / f"group_msg_{report_date}.md").write_text(group_msg, encoding="utf-8")
+    (output_dir / f"curated_{report_date}.md").write_text(group_msg, encoding="utf-8")
+    (output_dir / f"appendix_{report_date}.md").write_text(appendix_msg, encoding="utf-8")
     (output_dir / f"kb_doc_{report_date}.md").write_text(kb_doc, encoding="utf-8")
     logger.info("Outputs saved to %s", output_dir)
 
     if args.dry_run:
         logger.info("DRY RUN — skipping Feishu output")
         print("\n" + "=" * 50)
-        print("GROUP MESSAGE PREVIEW:")
+        print("📖 CURATED MESSAGE PREVIEW:")
         print("=" * 50)
-        print(group_msg[:2000])
+        print(group_msg[:1000])
         print("\n... (truncated)")
+        print(f"\n📋 附录共 {len(all_items)} 条来源")
         print("\nFull output saved to outputs/ directory")
         return
 
@@ -313,16 +320,33 @@ def main():
     doc_url = ""
 
     if is_ci():
-        # CI mode: use direct REST API (only group message, no KB doc in CI)
+        # CI mode: use direct REST API (no lark-cli needed)
         logger.info("CI mode: using REST API...")
         from output.feishu_api import FeishuAPI
 
         try:
             feishu = FeishuAPI()
+
+            # Message 1: Curated summaries
             ok = feishu.send_group_message(
                 chat_id=feishu_cfg.get("chat_id", ""),
                 markdown_content=group_msg,
             )
+            if ok:
+                logger.info("✅ Curated message sent")
+            else:
+                logger.error("❌ Curated message failed")
+
+            # Message 2: Appendix with all source links
+            appendix_ok = feishu.send_group_message(
+                chat_id=feishu_cfg.get("chat_id", ""),
+                markdown_content=appendix_msg,
+            )
+            if appendix_ok:
+                logger.info("✅ Appendix message sent")
+            else:
+                logger.warning("⚠️ Appendix message failed")
+
         except ValueError as e:
             logger.error("REST API init failed: %s", e)
             logger.warning(

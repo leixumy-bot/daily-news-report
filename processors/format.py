@@ -22,31 +22,22 @@ def today_bjt_cn() -> str:
     return datetime.now(BJT).strftime("%Y年%m月%d日")
 
 
-def build_group_message(
+def build_curated_message(
     summaries: list[dict],
-    all_items: list,
-    appendix_url: str = "",
     user_name: str = "徐磊",
     user_open_id: str = "",
     max_curated: int = 10,
 ) -> str:
-    """Build Feishu markdown for group chat message.
-
-    Capped at max_curated summaries in the curated section;
-    lower-priority topics go to a 'other notable' list.
-    """
+    """Build Feishu markdown for the curated summaries (Message 1)."""
     lines = []
 
-    # @mention user
     if user_open_id:
         lines.append(f'<at user_id="{user_open_id}">{user_name}</at>')
     lines.append("")
 
-    # Title
     lines.append(f"# 🤖 AI+Cloud 每日早报 · {today_bjt_cn()}")
     lines.append("")
 
-    # Separate into curated (top N by priority) and rest
     curated = summaries[:max_curated]
     rest = summaries[max_curated:]
 
@@ -58,16 +49,13 @@ def build_group_message(
         for s in highlights[:3]:
             lines.append(f"**{s['topic']}**")
             lines.append("")
-            # Extract a concise insight from the summary
             text = s.get("summary_text", "")
-            # Find the GTM启示 line if it exists
             insight = ""
             for line in text.split("\n"):
                 if "GTM" in line or "启示" in line:
                     insight = line.strip()
                     break
             if not insight:
-                # Use first meaningful line after heading
                 parts = text.split("\n\n")
                 for p in parts[1:]:
                     stripped = p.strip().strip("-").strip()
@@ -89,7 +77,6 @@ def build_group_message(
         lines.append("---")
         lines.append("")
 
-    # Remaining topics as list
     if rest:
         lines.append("## 📌 其他值得关注")
         lines.append("")
@@ -99,34 +86,51 @@ def build_group_message(
         lines.append("---")
         lines.append("")
 
-    # Footer with appendix link
-    lines.append("## 📋 附录")
+    lines.append("_完整附录来源列表见下一条消息 👇_")
     lines.append("")
-    lines.append(f"当日共采集 **{len(all_items)}** 条来源")
-    if appendix_url:
-        lines.append(f"📄 **[查看完整日报（含全部原文链接）]({appendix_url})**")
-        lines.append("")
-    else:
-        lines.append("")
-        # In CI mode (no KB doc), include items inline
-        by_source: dict[str, list] = {}
-        for item in all_items:
-            src = _get(item, "source", "unknown")
-            if src not in by_source:
-                by_source[src] = []
-            by_source[src].append(item)
-        for source_name in sorted(by_source.keys()):
-            lines.append(f"**{source_name}**")
-            for item in by_source[source_name]:
-                title = _get(item, "title", "")
-                url = _get(item, "url", "")
-                if url:
-                    lines.append(f"- [{title}]({url})")
-                else:
-                    lines.append(f"- {title}")
-            lines.append("")
     lines.append("---")
     lines.append(f"_由 AI+Cloud News Digest 自动生成 · {today_bjt_cn()} · 仅供行业参考_")
+
+    return "\n".join(lines)
+
+
+def build_appendix_message(
+    all_items: list,
+    date_str: str = "",
+) -> str:
+    """Build Feishu markdown for the appendix with all source links (Message 2).
+
+    Simple format: source name → bullet links. No complex formatting.
+    """
+    lines = []
+
+    lines.append(f"# 📋 附录 · 全部原文链接")
+    lines.append("")
+    lines.append(f"共 **{len(all_items)}** 条来源")
+    lines.append("")
+
+    by_source: dict[str, list] = {}
+    for item in all_items:
+        src = _get(item, "source", "unknown")
+        if src not in by_source:
+            by_source[src] = []
+        by_source[src].append(item)
+
+    for source_name in sorted(by_source.keys()):
+        lines.append("")
+        lines.append(f"**{source_name}**")
+        for item in by_source[source_name]:
+            title = _get(item, "title", "")
+            url = _get(item, "url", "")
+            if url:
+                lines.append(f"- [{title}]({url})")
+            else:
+                lines.append(f"- {title}")
+        lines.append("")
+
+    lines.append("")
+    lines.append("---")
+    lines.append(f"_由 AI+Cloud News Digest 自动生成_")
 
     return "\n".join(lines)
 
