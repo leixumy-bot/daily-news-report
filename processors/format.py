@@ -105,7 +105,26 @@ def build_group_message(
     lines.append(f"当日共采集 **{len(all_items)}** 条来源")
     if appendix_url:
         lines.append(f"📄 **[查看完整日报（含全部原文链接）]({appendix_url})**")
-    lines.append("")
+        lines.append("")
+    else:
+        lines.append("")
+        # In CI mode (no KB doc), include items inline
+        by_source: dict[str, list] = {}
+        for item in all_items:
+            src = _get(item, "source", "unknown")
+            if src not in by_source:
+                by_source[src] = []
+            by_source[src].append(item)
+        for source_name in sorted(by_source.keys()):
+            lines.append(f"**{source_name}**")
+            for item in by_source[source_name]:
+                title = _get(item, "title", "")
+                url = _get(item, "url", "")
+                if url:
+                    lines.append(f"- [{title}]({url})")
+                else:
+                    lines.append(f"- {title}")
+            lines.append("")
     lines.append("---")
     lines.append(f"_由 AI+Cloud News Digest 自动生成 · {today_bjt_cn()} · 仅供行业参考_")
 
