@@ -6,26 +6,44 @@
 
   "sources": {
     "rss": [
-      {
-        "name": "36氪",
-        "url": "https://36kr.com/feed",
-        "max_items": 20
-      },
-      {
-        "name": "钛媒体",
-        "url": "https://www.tmtpost.com/rss.xml",
-        "max_items": 20
-      }
+      {"name": "OpenAI Blog", "url": "https://openai.com/blog/rss.xml", "max_items": 5},
+      {"name": "Google DeepMind", "url": "https://deepmind.google/blog/rss.xml", "max_items": 5},
+      {"name": "AWS ML Blog", "url": "https://aws.amazon.com/blogs/machine-learning/feed/", "max_items": 5},
+      {"name": "Azure Blog", "url": "https://azure.microsoft.com/en-us/blog/feed/", "max_items": 5},
+      {"name": "NVIDIA Blog", "url": "https://blogs.nvidia.com/feed/", "max_items": 5},
+      {"name": "Cloudflare Blog", "url": "https://blog.cloudflare.com/rss/", "max_items": 5},
+      {"name": "MIT Technology Review", "url": "https://www.technologyreview.com/feed/", "max_items": 8},
+      {"name": "IEEE Spectrum", "url": "https://spectrum.ieee.org/rss", "max_items": 8},
+      {"name": "The New Stack", "url": "https://thenewstack.io/feed/", "max_items": 8},
+      {"name": "雷峰网", "url": "https://www.leiphone.com/feed", "max_items": 10},
+      {"name": "36氪", "url": "https://36kr.com/feed", "max_items": 15},
+      {"name": "钛媒体", "url": "https://www.tmtpost.com/rss.xml", "max_items": 10},
+      {"name": "Latent Space", "url": "https://latent.space/feed.xml", "max_items": 5},
+      {"name": "Interconnects", "url": "https://interconnects.ai/feed/", "max_items": 5},
+      {"name": "Simon Willison", "url": "https://simonwillison.net/atom/everything/", "max_items": 5},
+      {"name": "SemiAnalysis", "url": "https://semianalysis.com/feed/", "max_items": 5}
     ],
     "web_search": {
       "enabled": true,
       "queries": [
+        "site:openai.com AI 模型 2026",
+        "site:anthropic.com AI 2026",
+        "site:aws.amazon.com AI 云服务 2026",
+        "site:cloud.google.com AI infrastructure 2026",
+        "site:azure.microsoft.com AI 2026",
+        "site:blogs.nvidia.com AI GPU 2026",
+        "site:blog.cloudflare.com AI 2026",
+        "site:technologyreview.com AI 2026",
+        "site:spectrum.ieee.org AI 2026",
+        "site:thenewstack.io AI 2026",
+        "site:latent.space AI 2026",
+        "site:interconnects.ai AI 2026",
+        "site:simonwillison.net AI 2026",
+        "site:semianalysis.com AI 2026",
+        "site:leiphone.com AI 云计算 2026",
         "site:36kr.com AI 大模型 2026",
         "site:jiqizhixin.com AI 大模型 2026",
-        "site:leiphone.com AI 云计算 2026",
         "site:geekpark.net AI Agent 2026",
-        "site:mp.weixin.qq.com Founder Park 大模型 2026",
-        "site:mp.weixin.qq.com AI科技评论 2026",
         "site:thepaper.cn AI 人工智能 2026",
         "site:huxiu.com AI 企业服务 2026"
       ],
@@ -33,7 +51,15 @@
     },
     "podcast": {
       "enabled": true,
-      "sources": ["硅谷101", "42章经", "乱翻书"],
+      "sources": [
+        "硅谷101",
+        "42章经",
+        "乱翻书",
+        "Dwarkesh",
+        "Practical AI",
+        "Microsoft Research",
+        "80,000 Hours"
+      ],
       "max_results_per_source": 3
     }
   },
