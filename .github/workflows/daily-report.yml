@@ -46,7 +46,7 @@ jobs:
             exit 0
           fi
           TODAY=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
-          LAST_RUN=$(gh variable get DAILY_REPORT_LAST_RUN --repo ${{ github.repository }} 2>/dev/null || echo "")
+          LAST_RUN=$(gh api "repos/${{ github.repository }}/actions/variables/DAILY_REPORT_LAST_RUN" --jq '.value' 2>/dev/null || echo "")
           if [ "$LAST_RUN" = "$TODAY" ]; then
             echo "✅ 今日日报已于 $TODAY 完成，跳过本次触发"
             echo "skip=true" >> $GITHUB_OUTPUT
@@ -108,5 +108,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TODAY=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
-          gh variable set DAILY_REPORT_LAST_RUN --repo ${{ github.repository }} --value "$TODAY"
+          gh api -X PATCH "repos/${{ github.repository }}/actions/variables/DAILY_REPORT_LAST_RUN" \
+            -f name="DAILY_REPORT_LAST_RUN" -f value="$TODAY"
           echo "✅ 已将 $TODAY 标记为已完成"
