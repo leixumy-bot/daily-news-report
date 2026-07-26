@@ -47,11 +47,21 @@ def summarize_clusters(
         # Build items text
         lines = []
         for item in items:
-            lines.append(f"- **{item.get('title', '')}**")
-            lines.append(f"  来源：{item.get('source', '')} | 链接：{item.get('url', '')}")
-            snippet = item.get("body", "")
-            if snippet:
-                lines.append(f"  摘要：{snippet[:200]}")
+            # Handle both dict items and plain strings (from LLM output)
+            if isinstance(item, str):
+                title = item
+                source = ""
+                url = ""
+                body = ""
+            else:
+                title = item.get("title", "")
+                source = item.get("source", "")
+                url = item.get("url", "")
+                body = item.get("body", "") or item.get("snippet", "")
+            lines.append(f"- **{title}**")
+            lines.append(f"  来源：{source} | 链接：{url}")
+            if body:
+                lines.append(f"  摘要：{body[:200]}")
             lines.append("")
 
         items_text = "\n".join(lines)

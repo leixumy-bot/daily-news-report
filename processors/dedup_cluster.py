@@ -37,7 +37,7 @@ def build_user_message(items: list[NewsItem]) -> str:
         }
         for i in items
     ]
-    return f"请对以下 {len(items)} 条新闻进行去重和聚类：\n\n{json.dumps(truncated, ensure_ascii=False, indent=2)}\n\n返回 JSON：{{\"clusters\": [{{\"topic\": \"...\", \"priority\": 1-5, \"items\": [...], \"relevance\": \"...\"}}]}}"
+    return f"请对以下 {len(items)} 条新闻进行去重和聚类：\n\n{json.dumps(truncated, ensure_ascii=False, indent=2)}\n\n返回 JSON：{{\"clusters\": [{{\"topic\": \"...\", \"priority\": 1-5, \"items\": [{{\"title\": \"...\", \"url\": \"...\", \"source\": \"...\", \"snippet\": \"...\"}}], \"relevance\": \"...\"}}]}}"
 
 
 def run_dedup_cluster(
@@ -76,7 +76,7 @@ def run_dedup_cluster(
                         "content": (
                             "请严格按照以下 JSON 格式对新闻条目进行去重和聚类，只保留 AI/Cloud 相关条目：\n\n"
                             f"{build_user_message(items)}\n\n"
-                            '输出格式: {"clusters": [{"topic": "标题", "priority": 1-5, "items": [...], "relevance": "..."}]}\n'
+                            '输出格式: {"clusters": [{"topic": "标题", "priority": 1-5, "items": [{"title": "...", "url": "...", "source": "...", "snippet": "..."}], "relevance": "..."}]}\n'
                             "只输出 JSON，不要任何其他文字。"
                         ),
                     }
