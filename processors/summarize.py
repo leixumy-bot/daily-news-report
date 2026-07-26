@@ -39,41 +39,46 @@ def summarize_clusters(
     summaries: list[dict] = []
 
     for i, cluster in enumerate(clusters):
-        topic = cluster.get("topic", "未命名话题")
-        priority = cluster.get("priority", 3)
-        relevance = cluster.get("relevance", "")
-        items = cluster.get("items", [])
+        try:
+            topic = cluster.get("topic", "未命名话题")
+            priority = cluster.get("priority", 3)
+            relevance = cluster.get("relevance", "")
+            items = cluster.get("items", [])
 
-        # Build items text
-        lines = []
-        for item in items:
-            # Handle both dict items and plain strings (from LLM output)
-            if isinstance(item, str):
-                title = item
-                source = ""
-                url = ""
-                body = ""
-            else:
-                title = item.get("title", "")
-                source = item.get("source", "")
-                url = item.get("url", "")
-                body = item.get("body", "") or item.get("snippet", "")
-            lines.append(f"- **{title}**")
-            lines.append(f"  来源：{source} | 链接：{url}")
-            if body:
-                lines.append(f"  摘要：{body[:200]}")
-            lines.append("")
+            # Build items text
+            lines = []
+            for item in items:
+                # Handle both dict items and plain strings (from LLM output)
+                if isinstance(item, str):
+                    title = item
+                    source = ""
+                    url = ""
+                    body = ""
+                else:
+                    title = item.get("title", "")
+                    source = item.get("source", "")
+                    url = item.get("url", "")
+                    body = item.get("body", "") or item.get("snippet", "")
+                lines.append(f"- **{title}**")
+                lines.append(f"  来源：{source} | 链接：{url}")
+                if body:
+                    lines.append(f"  摘要：{body[:200]}")
+                lines.append("")
 
-        items_text = "\n".join(lines)
+            items_text = "\n".join(lines)
 
-        # Pick primary source for attribution
-        primary_source = ""
-        primary_url = ""
-        if items:
-            primary_source = items[0].get("source", "")
-            primary_url = items[0].get("url", "")
+            # Pick primary source for attribution
+            primary_source = ""
+            primary_url = ""
+            if items:
+                if isinstance(items[0], str):
+                    primary_source = ""
+                    primary_url = ""
+                else:
+                    primary_source = items[0].get("source", "")
+                    primary_url = items[0].get("url", "")
 
-        user_msg = f"""请为以下话题撰写精读摘要：
+            user_msg = f"""请为以下话题撰写精读摘要：
 
 话题：{topic}
 相关度评分：{priority}/5
@@ -82,41 +87,47 @@ def summarize_clusters(
 
 请按指定格式输出。"""
 
-        try:
-            logger.info(
-                "LLM Stage 2: summarizing cluster %d/%d '%s' (priority %d)",
-                i + 1,
-                len(clusters),
-                topic,
-                priority,
-            )
-            raw = llm.messages_create(
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_msg}],
-            )
-        except LLMError as e:
-            logger.error(
-                "LLM Stage 2 failed for cluster '%s': %s", topic, e
-            )
-            # Fallback: use first item title as summary
-            first_title = items[0].get("title", "") if items else ""
-            raw = f"""## {topic}
+            try:
+                logger.info(
+                    "LLM Stage 2: summarizing cluster %d/%d '%s' (priority %d)",
+                    i + 1,
+                    len(clusters),
+                    topic,
+                    priority,
+                )
+                raw = llm.messages_create(
+                    system=SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": user_msg}],
+                )
+            except LLMError as e:
+                logger.error(
+                    "LLM Stage 2 failed for cluster '%s': %s", topic, e
+                )
+                # Fallback: use first item title as summary
+                if items:
+                    first_title = items[0] if isinstance(items[0], str) else items[0].get("title", "")
+                else:
+                    first_title = ""
+                raw = f"""## {topic}
 
 {first_title}
 
 **来源：** [{primary_source}]({primary_url})
 **对 AI/Cloud GTM 的启示：** {relevance}"""
 
-        summaries.append(
-            {
-                "topic": topic,
-                "priority": priority,
-                "summary_text": raw,
-                "source": primary_source,
-                "url": primary_url,
-                "relevance": relevance,
-            }
-        )
+            summaries.append(
+                {
+                    "topic": topic,
+                    "priority": priority,
+                    "summary_text": raw,
+                    "source": primary_source,
+                    "url": primary_url,
+                    "relevance": relevance,
+                }
+            )
+        except Exception as e:
+            logger.error("Cluster %d skipped due to error: %s", i, e, exc_info=True)
+            continue
 
     # Sort by priority descending
     summaries.sort(key=lambda s: s.get("priority", 0), reverse=True)

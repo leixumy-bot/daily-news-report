@@ -465,4 +465,30 @@ def _send_error_notification(config: dict, error_msg: str):
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logging.getLogger("main").exception("Fatal error — 日报流程未捕获异常")
+        # Send failure notification to Feishu (best effort)
+        try:
+            config_path = HERE / "config.json"
+            if config_path.exists():
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                feishu_cfg = config.get("feishu", {})
+                if feishu_cfg.get("chat_id"):
+                    from output.feishu_api import FeishuAPI
+                    api = FeishuAPI()
+                    date_str = date_bjt()
+                    msg = (
+                        f"# ⚠️ AI+Cloud 早报生成失败\n\n"
+                        f"日期：{date_str}\n"
+                        f"错误：{e}\n\n"
+                        f"请检查 GitHub Actions 日志排查原因。"
+                    )
+                    api.send_group_message(
+                        chat_id=feishu_cfg["chat_id"],
+                        markdown_content=msg,
+                    )
+        except Exception:
+            pass
+        sys.exit(1)

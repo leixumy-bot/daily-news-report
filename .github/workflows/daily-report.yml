@@ -1,9 +1,11 @@
 name: AI+Cloud 每日早报
 
 on:
-  # 每天北京时间 11:00 自动运行 (UTC 03:00)
+  # 每天北京时间 11:00 和 13:00 各触发一次 (UTC 03:00 / 05:00)
+  # 双定时兜底：前一次因故未触发时，后一次补上
   schedule:
-    - cron: '0 3 * * *'
+    - cron: '0 3 * * *'   # BJT 11:00
+    - cron: '0 5 * * *'   # BJT 13:00 — 11:00 未触发/失败时的补救机会
   # 也支持手动触发
   workflow_dispatch:
     inputs:
@@ -16,13 +18,46 @@ on:
         required: false
         type: boolean
         default: false
+      force:
+        description: '强制重跑（跳过今日已完成的检查）'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: daily-news-report
   cancel-in-progress: false
 
 jobs:
+  check-skip:
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - name: Check if already ran today (双定时幂等保护)
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 手动触发带 --force 时始终执行
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force }}" = "true" ]; then
+            echo "skip=false (force)"
+            echo "skip=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          TODAY=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
+          LAST_RUN=$(gh variable get DAILY_REPORT_LAST_RUN --repo ${{ github.repository }} 2>/dev/null || echo "")
+          if [ "$LAST_RUN" = "$TODAY" ]; then
+            echo "✅ 今日日报已于 $TODAY 完成，跳过本次触发"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
   build-report:
+    needs: check-skip
+    if: needs.check-skip.outputs.should_skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -62,4 +97,16 @@ jobs:
           if [ -n "${{ github.event.inputs.date }}" ]; then
             ARGS="$ARGS --date ${{ github.event.inputs.date }}"
           fi
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            ARGS="$ARGS --force"
+          fi
           python3 daily_report.py $ARGS
+
+      - name: Mark today as completed
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TODAY=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
+          gh variable set DAILY_REPORT_LAST_RUN --repo ${{ github.repository }} --value "$TODAY"
+          echo "✅ 已将 $TODAY 标记为已完成"
