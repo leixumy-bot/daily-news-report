@@ -94,6 +94,11 @@
     "bot_app_id": "cli_aae913b2d7f89cba"
   },
 
+  "bitable": {
+    "app_token": "Jhi4bIOiia7K7asiinyc27PIn1c",
+    "table_id": "tblwj7BApfF5hC3A"
+  },
+
   "llm": {
     "api_base": "https://api.deepseek.com/anthropic",
     "api_key_env": "ANTHROPIC_AUTH_TOKEN",

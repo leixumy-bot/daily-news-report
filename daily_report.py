@@ -372,7 +372,25 @@ def main():
     else:
         logger.error("❌ Group message failed: %s", err if 'err' in dir() else "see above")
 
-    # Step B: Create KB doc (local mode only, needs user identity)
+    # Step B: Write summaries to Base (多维表格留存)
+    if ok:
+        from output.feishu_base import save_summaries_to_base
+        try:
+            bitable_cfg = config.get("bitable", {})
+            base_ok = save_summaries_to_base(
+                summaries=summaries,
+                date_str=report_date,
+                app_token=bitable_cfg.get("app_token", ""),
+                table_id=bitable_cfg.get("table_id", ""),
+            )
+            if base_ok:
+                logger.info("✅ Summaries written to Base")
+            else:
+                logger.warning("⚠️ Base write had no effect (maybe all skipped)")
+        except Exception as e:
+            logger.error("❌ Base write failed: %s", e)
+
+    # Step C: Create KB doc (local mode only, needs user identity)
     if not is_ci():
         logger.info("Creating KB doc...")
         from output.feishu_kb import create_kb_doc
