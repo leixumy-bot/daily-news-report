@@ -16,9 +16,6 @@ logger = logging.getLogger("feishu-api")
 
 FEISHU_BASE = "https://open.feishu.cn/open-apis"
 
-# Post content limit check
-MAX_POST_BYTES = 38000
-
 
 class FeishuAPI:
     """Direct Feishu Open API client using bot identity."""
@@ -52,25 +49,13 @@ class FeishuAPI:
         }
 
     def send_group_message(self, chat_id: str, markdown_content: str) -> bool:
-        """Send post (rich text) message with links and formatting."""
-        if len(markdown_content.encode("utf-8")) > MAX_POST_BYTES:
-            parts = self._split_content(markdown_content)
-            for i, part in enumerate(parts):
-                post = self._md_to_post(part)
-                ok = self._post_message(chat_id, post)
-                if not ok:
-                    return False
-            return True
-        else:
-            post = self._md_to_post(markdown_content)
-            return self._post_message(chat_id, post)
+        """Send post (rich text) message with links and formatting.
 
-    def _split_content(self, markdown: str) -> list[str]:
-        """Split into curated + appendix when too long."""
-        idx = markdown.find("## 📋 附录")
-        if idx > 0:
-            return [markdown[:idx].rstrip() + "\n\n📄 *完整附录见下一条消息*", markdown[idx:]]
-        return [markdown]
+        长度切分已由 processors.format.split_markdown_by_bytes 在调用前完成，
+        此处直接发送单条 markdown。
+        """
+        post = self._md_to_post(markdown_content)
+        return self._post_message(chat_id, post)
 
     def _post_message(self, chat_id: str, post: dict) -> bool:
         payload = {

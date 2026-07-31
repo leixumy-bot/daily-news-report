@@ -1,7 +1,10 @@
 {
   "report": {
     "name": "AI+Cloud 每日早报",
-    "bjt_hour": 12
+    "bjt_hour": 12,
+    "max_entries_per_category": 3,
+    "summarize_cap": 24,
+    "research_max": 3
   },
 
   "sources": {
@@ -45,7 +48,16 @@
         "site:jiqizhixin.com AI 大模型 2026",
         "site:geekpark.net AI Agent 2026",
         "site:thepaper.cn AI 人工智能 2026",
-        "site:huxiu.com AI 企业服务 2026"
+        "site:huxiu.com AI 企业服务 2026",
+        "site:goldmansachs.com AI 2026",
+        "site:morganstanley.com AI 2026",
+        "site:ubs.com AI 2026",
+        "site:bofaml.com AI 2026",
+        "site:cicc.com AI 研报 2026",
+        "site:citic.com AI 2026",
+        "site:mckinsey.com AI 2026",
+        "site:gartner.com AI 2026",
+        "site:miit.gov.cn AI 政策 2026"
       ],
       "max_results_per_query": 3
     },
@@ -61,6 +73,38 @@
         "80,000 Hours"
       ],
       "max_results_per_source": 3
+    },
+    "official_media": {
+      "enabled": true,
+      "sources": [
+        {
+          "name": "网信办",
+          "columns": [
+            {"name": "时政要闻", "url": "https://www.cac.gov.cn/yaowen/szyw/A093601index_1.htm", "max_items": 10},
+            {"name": "政策法规", "url": "https://www.cac.gov.cn/wxzw/zcfg/A093703index_1.htm", "max_items": 10},
+            {"name": "网络安全", "url": "https://www.cac.gov.cn/wxzw/wlaq/A093705index_1.htm", "max_items": 10},
+            {"name": "数据治理", "url": "https://www.cac.gov.cn/wxzw/sjzl/A093708index_1.htm", "max_items": 10}
+          ]
+        },
+        {
+          "name": "发改委",
+          "columns": [
+            {"name": "政策通知", "url": "https://www.ndrc.gov.cn/xxgk/zcfb/tz/wap_index.html", "max_items": 10}
+          ]
+        },
+        {
+          "name": "国家数据局",
+          "columns": [
+            {"name": "通知公告", "url": "https://www.nda.gov.cn/sjj/zwgk/tzgg/list/index_pc_1.html", "max_items": 10}
+          ]
+        },
+        {
+          "name": "中国政府网",
+          "columns": [
+            {"name": "最新政策", "url": "https://www.gov.cn/zhengce/", "max_items": 10}
+          ]
+        }
+      ]
     }
   },
 
@@ -80,7 +124,18 @@
       "OpenAI", "DeepSeek", "Anthropic",
       "微软", "谷歌", "Amazon", "AWS",
       "融资", "投资",
-      "智能驾驶", "自动驾驶"
+      "智能驾驶", "自动驾驶",
+      "网信办", "工信部", "发改委", "国家数据局", "国务院",
+      "监管", "备案",
+      "出口管制", "数据要素", "数据出境", "数据安全", "个人信息保护",
+      "生成式人工智能", "AI治理", "人工智能治理", "AI法案", "反垄断",
+      "对抗样本", "deepfake", "深度伪造", "AI安全"
+    ],
+    "official_include": [
+      "人工智能", "AI", "大模型", "智能", "数据", "数字", "算力",
+      "芯片", "机器人", "云计算", "网络", "信息化", "模型", "要素",
+      "产业", "基础设施", "监管", "安全", "备案", "审查", "试点",
+      "规划", "个人信息", "生成式", "算法", "技术", "创新", "转型"
     ]
   },
 
@@ -91,12 +146,15 @@
     "wiki_space_id": "my_library",
     "bot_as": "bot",
     "user_as": "user",
-    "bot_app_id": "cli_aae913b2d7f89cba"
+    "bot_app_id": "cli_aae913b2d7f89cba",
+    "max_post_bytes": 28000
   },
 
   "bitable": {
     "app_token": "Jhi4bIOiia7K7asiinyc27PIn1c",
-    "table_id": "tblwj7BApfF5hC3A"
+    "table_id": "tblwj7BApfF5hC3A",
+    "backfill_batch_size": 20,
+    "update_batch_size": 100
   },
 
   "llm": {
@@ -106,6 +164,6 @@
     "max_tokens": 16384,
     "temperature": 0.3,
     "max_retries": 2,
-    "timeout_seconds": 120
+    "timeout_seconds": 240
   }
 }

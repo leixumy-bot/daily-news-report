@@ -23,6 +23,16 @@ on:
         required: false
         type: boolean
         default: false
+      backfill_base:
+        description: '仅回填多维表格历史记录分类/类型（不生成日报）'
+        required: false
+        type: boolean
+        default: false
+      backfill_dry_run:
+        description: '回填预检：只打印分类计划，不写表格'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: daily-news-report
@@ -31,7 +41,7 @@ concurrency:
 jobs:
   build-report:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -99,6 +109,14 @@ jobs:
           LARK_BASE_TOKEN: ${{ secrets.LARK_BASE_TOKEN }}
 
         run: |
+          if [ "${{ github.event.inputs.backfill_base }}" = "true" ]; then
+            if [ "${{ github.event.inputs.backfill_dry_run }}" = "true" ]; then
+              python3 backfill_base.py --dry-run
+            else
+              python3 backfill_base.py
+            fi
+            exit $?
+          fi
           ARGS=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             ARGS="$ARGS --dry-run"

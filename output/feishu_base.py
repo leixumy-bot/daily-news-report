@@ -6,7 +6,9 @@ Reuses FeishuAPI for tenant token management.
 import json
 import logging
 import os
+import re
 import time
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 import requests
@@ -14,6 +16,86 @@ import requests
 logger = logging.getLogger("feishu-base")
 
 FEISHU_BASE = "https://open.feishu.cn/open-apis"
+BJT = timezone(timedelta(hours=8))
+
+
+def _field_date_bjt(value) -> str:
+    """把多维表格日期字段值（秒/毫秒时间戳或字符串）转成 BJT YYYY-MM-DD。"""
+    if isinstance(value, (int, float)):
+        ts = value / 1000 if value > 1e12 else value  # 毫秒→秒
+        return datetime.fromtimestamp(ts, tz=BJT).strftime("%Y-%m-%d")
+    if isinstance(value, str):
+        m = re.match(r"(\d{4}-\d{2}-\d{2})", value)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def search_records(
+    app_token: str,
+    table_id: str,
+    field_names: list[str] | None = None,
+    page_size: int = 500,
+) -> list[dict]:
+    """分页拉取全部记录，每条保留 record_id。返回 [{"record_id":..., "fields":{...}}]。"""
+    url = f"{FEISHU_BASE}/bitable/v1/apps/{app_token}/tables/{table_id}/records/search"
+    all_records: list[dict] = []
+    page_token = ""
+    while True:
+        payload: dict = {"page_size": page_size}
+        if field_names:
+            payload["field_names"] = field_names
+        if page_token:
+            payload["page_token"] = page_token
+        try:
+            resp = requests.post(url, headers=_headers(), json=payload, timeout=20)
+        except requests.RequestException as e:
+            logger.warning("Search records request failed: %s", e)
+            break
+        if resp.status_code != 200 or resp.json().get("code") != 0:
+            logger.warning("Search records error: HTTP %d %s",
+                           resp.status_code, resp.text[:200])
+            break
+        data = resp.json().get("data", {})
+        all_records.extend(data.get("items", []))
+        if not data.get("has_more"):
+            break
+        page_token = data.get("page_token", "")
+        if not page_token:
+            break
+    return all_records
+
+
+def batch_update_records(
+    app_token: str,
+    table_id: str,
+    records: list[dict],
+    batch_size: int = 100,
+) -> dict:
+    """批量更新记录。records: [{"record_id":..., "fields":{...}}]。返回汇总。"""
+    url = f"{FEISHU_BASE}/bitable/v1/apps/{app_token}/tables/{table_id}/records/batch_update"
+    success = 0
+    failed: list[dict] = []
+    for i in range(0, len(records), batch_size):
+        batch = records[i : i + batch_size]
+        try:
+            resp = requests.post(url, headers=_headers(), json={"records": batch}, timeout=20)
+        except requests.RequestException as e:
+            logger.error("batch_update request failed: %s", e)
+            failed.extend(batch)
+            continue
+        if resp.status_code != 200:
+            logger.error("batch_update HTTP %d %s", resp.status_code, resp.text[:200])
+            failed.extend(batch)
+            continue
+        data = resp.json()
+        if data.get("code") != 0:
+            logger.error("batch_update error: %s", data.get("msg", ""))
+            failed.extend(batch)
+            continue
+        success += len(batch)
+        logger.info("batch_update: %d records ok", len(batch))
+    return {"success": success, "failed": failed}
 
 
 def _get_token() -> str:
@@ -42,45 +124,23 @@ def _headers() -> dict:
 
 def _existing_records(
     app_token: str, table_id: str, date_str: str
-) -> set[str]:
-    """Fetch existing topic titles for a given date to avoid duplicates."""
-    url = (
-        f"{FEISHU_BASE}/bitable/v1/apps/{app_token}/tables/{table_id}/records/search"
-    )
-    # date filter: exact match on 日期 field
-    payload = {
-        "field_names": ["话题标题"],
-        "filter": {
-            "conjunction": "and",
-            "conditions": [
-                {
-                    "field_name": "日期",
-                    "operator": "is",
-                    "value": date_str,
-                }
-            ],
-        },
-    }
-    try:
-        resp = requests.post(url, headers=_headers(), json=payload, timeout=15)
-        if resp.status_code != 200:
-            logger.warning("Failed to search existing records: HTTP %d", resp.status_code)
-            return set()
-        data = resp.json()
-        if data.get("code") != 0:
-            logger.warning("Search records error: %s", data.get("msg", ""))
-            return set()
-        items = data.get("data", {}).get("items", [])
-        existing = set()
-        for item in items:
-            fields = item.get("fields", {})
-            topic = fields.get("话题标题", "")
-            if topic:
-                existing.add(topic)
-        return existing
-    except requests.RequestException as e:
-        logger.warning("Search records request failed: %s", e)
-        return set()
+) -> tuple[set[str], set[str]]:
+    """拉取指定日期的记录，返回 (话题标题集合, record_id 集合)。
+
+    日期按字段值（秒/毫秒时间戳）解析成 BJT 日期比对，修复字符串匹配失效问题。
+    """
+    records = search_records(app_token, table_id, field_names=["话题标题", "日期"])
+    topics: set[str] = set()
+    record_ids: set[str] = set()
+    for r in records:
+        fields = r.get("fields", {})
+        if _field_date_bjt(fields.get("日期")) != date_str:
+            continue
+        topic = fields.get("话题标题", "")
+        if topic:
+            topics.add(topic)
+            record_ids.add(r.get("record_id", ""))
+    return topics, record_ids
 
 
 def save_summaries_to_base(
@@ -102,9 +162,9 @@ def save_summaries_to_base(
         return False
 
     # Check existing records for today
-    existing = _existing_records(app_token, table_id, date_str)
-    if existing:
-        logger.info("Found %d existing topics for %s in Base", len(existing), date_str)
+    existing_topics, _ = _existing_records(app_token, table_id, date_str)
+    if existing_topics:
+        logger.info("Found %d existing topics for %s in Base", len(existing_topics), date_str)
 
     headers = _headers()
     url = f"{FEISHU_BASE}/bitable/v1/apps/{app_token}/tables/{table_id}/records"
@@ -118,9 +178,11 @@ def save_summaries_to_base(
         summary_text = s.get("summary_text", "")
         source = s.get("source", "")
         source_url = s.get("url", "")
+        category = s.get("category", "其他")
+        item_type = s.get("type", "新闻")
 
         # Skip if already recorded for this date
-        if topic in existing:
+        if topic in existing_topics:
             logger.info("  ⏭️  Skipped (already exists): %s", topic)
             skipped_count += 1
             continue
@@ -136,6 +198,8 @@ def save_summaries_to_base(
                 "精读摘要": summary_text,
                 "来源": source,
                 "来源链接": source_link,
+                "分类": category,
+                "类型": item_type,
             }
         }
 

@@ -56,13 +56,23 @@ def setup_logging(verbose: bool = False):
 
 
 # ── Keyword Filter ──
-def keyword_filter(items: list, keywords: list[str]) -> list:
-    """Keep items where title or body contains at least one keyword."""
-    if not keywords:
+def keyword_filter(
+    items: list, keywords: list[str], official_keywords: list[str] | None = None
+) -> list:
+    """Keep items where title or body contains at least one keyword.
+
+    官方媒体源（source 以「官方/」开头）用 official_keywords 宽松过滤，
+    普通源用 keywords。避免官方源无条件放行导致无关政府新闻灌入聚类。
+    """
+    official_keywords = official_keywords or []
+    if not keywords and not official_keywords:
         return items
 
     def matches(item) -> bool:
+        source = getattr(item, "source", "") or ""
         text = (getattr(item, "title", "") + " " + getattr(item, "body", "")).lower()
+        if source.startswith("官方/"):
+            return any(kw.lower() in text for kw in official_keywords)
         return any(kw.lower() in text for kw in keywords)
 
     filtered = [it for it in items if matches(it)]
@@ -101,6 +111,11 @@ def parse_args():
         help="Only run collectors, skip LLM processing and output",
     )
     p.add_argument(
+        "--backfill",
+        action="store_true",
+        help="回填多维表格历史记录的分类/类型（只更新，不删除）",
+    )
+    p.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Verbose logging (debug level)",
@@ -115,6 +130,14 @@ def main():
     args = parse_args()
     setup_logging(args.verbose)
     logger = logging.getLogger("main")
+
+    # ── Backfill mode: 转发到 backfill_base.py ──
+    if args.backfill:
+        import subprocess
+        cmd = [sys.executable, str(HERE / "backfill_base.py")]
+        if args.dry_run:
+            cmd.append("--dry-run")
+        sys.exit(subprocess.call(cmd))
 
     # ── Load config ──
     config_path = HERE / "config.json"
@@ -139,6 +162,7 @@ def main():
     from collectors.podcast_search import PodcastCollector
     from collectors.xhs_collector import XiaohongshuCollector
     from collectors.wechat_collector import WechatCollector
+    from collectors.official_media import OfficialMediaCollector
 
     src_cfg = config.get("sources", {})
 
@@ -183,16 +207,25 @@ def main():
     # WeChat (DDGS search only, works in both modes)
     collectors.append(WechatCollector())
 
+    # Official media (官方媒体/政府机构，白名单源)
+    om_cfg = src_cfg.get("official_media", {})
+    if om_cfg.get("enabled", True):
+        for om in om_cfg.get("sources", []):
+            collectors.append(
+                OfficialMediaCollector(om.get("name", ""), om.get("columns", []))
+            )
+
     all_items: list = []
     errors: list[str] = []
 
     # Define timeouts per collector type (seconds)
     COLLECTOR_TIMEOUTS = {
         "RSSCollector": 20,
-        "WebSearchCollector": 60,
+        "WebSearchCollector": 90,
         "PodcastCollector": 30,
         "XiaohongshuCollector": 25,
         "WechatCollector": 30,
+        "OfficialMediaCollector": 30,
     }
 
     for col in collectors:
@@ -211,7 +244,8 @@ def main():
     # ── 2. KEYWORD FILTER ──
     logger.info("[2/5] 关键词过滤...")
     keywords = config.get("keywords", {}).get("include", [])
-    relevant = keyword_filter(all_items, keywords)
+    official_keywords = config.get("keywords", {}).get("official_include", [])
+    relevant = keyword_filter(all_items, keywords, official_keywords)
 
     if not relevant:
         logger.warning("No relevant items after keyword filter")
@@ -245,11 +279,14 @@ def main():
 
     # Log clusters
     for c in clusters:
-        logger.info("  cluster: [%d] %s", c.get("priority", 0), c.get("topic", "?"))
+        logger.info("  cluster: [%d] %s [%s/%s]", c.get("priority", 0),
+                    c.get("topic", "?"), c.get("category", "?"), c.get("type", "?"))
 
-    # Keep only top 12 clusters by priority (covers more than 10 in case some fail)
-    clusters.sort(key=lambda c: c.get("priority", 0), reverse=True)
-    clusters_for_summary = clusters[:12]
+    # 按分类选精读：每类最多 3 条，研报单独最多 3 条
+    from processors.categories import select_for_summarize
+    clusters_for_summary = select_for_summarize(
+        clusters, cap=config.get("report", {}).get("summarize_cap", 24)
+    )
 
     # ── 4. LLM STAGE 2: SUMMARIZE ──
     logger.info("[4/5] LLM 精读摘要 (%d clusters)...", len(clusters_for_summary))
@@ -269,53 +306,50 @@ def main():
 
     # ── 5. FORMAT + OUTPUT ──
     logger.info("[5/5] 格式化 + 飞书输出...")
-    from processors.format import (
-        build_curated_message,
-        build_appendix_message,
-        build_kb_document,
-    )
+    from processors.format import build_messages, build_kb_document
 
-    # Format curated message (Message 1)
-    group_msg = build_curated_message(
+    feishu_cfg = config.get("feishu", {})
+    max_bytes = feishu_cfg.get("max_post_bytes", 28000)
+
+    messages = build_messages(
         summaries=summaries,
-        user_name=config.get("feishu", {}).get("user_name", ""),
-        user_open_id=config.get("feishu", {}).get("user_open_id", ""),
+        clusters=clusters,
+        max_bytes=max_bytes,
+        user_name=feishu_cfg.get("user_name", ""),
+        user_open_id=feishu_cfg.get("user_open_id", ""),
     )
-
-    # Format appendix message (Message 2)
-    appendix_msg = build_appendix_message(
-        all_items=all_items,
-        date_str=report_date,
-    )
+    chunks = messages["five_layer"] + messages["policy_security"]
 
     kb_doc = build_kb_document(
         summaries=summaries,
-        all_items=all_items,
+        clusters=clusters,
         date_str=report_date,
     )
 
     # Save locally
     output_dir = HERE / "outputs"
     output_dir.mkdir(exist_ok=True)
-    (output_dir / f"curated_{report_date}.md").write_text(group_msg, encoding="utf-8")
-    (output_dir / f"appendix_{report_date}.md").write_text(appendix_msg, encoding="utf-8")
+    (output_dir / f"five_layer_{report_date}.md").write_text(
+        "\n\n---\n\n".join(messages["five_layer"]), encoding="utf-8")
+    (output_dir / f"policy_security_{report_date}.md").write_text(
+        "\n\n---\n\n".join(messages["policy_security"]), encoding="utf-8")
     (output_dir / f"kb_doc_{report_date}.md").write_text(kb_doc, encoding="utf-8")
     logger.info("Outputs saved to %s", output_dir)
 
     if args.dry_run:
         logger.info("DRY RUN — skipping Feishu output")
         print("\n" + "=" * 50)
-        print("📖 CURATED MESSAGE PREVIEW:")
+        print(f"📖 消息1（五层）共 {len(messages['five_layer'])} 段，首段预览:")
         print("=" * 50)
-        print(group_msg[:1000])
-        print("\n... (truncated)")
-        print(f"\n📋 附录共 {len(all_items)} 条来源")
+        print(messages["five_layer"][0][:900])
+        print("\n" + "=" * 50)
+        print(f"📋 消息2（政策/安全/其他/研报）共 {len(messages['policy_security'])} 段，首段预览:")
+        print("=" * 50)
+        print(messages["policy_security"][0][:900])
         print("\nFull output saved to outputs/ directory")
         return
 
     # ── Send to Feishu ──
-    feishu_cfg = config.get("feishu", {})
-
     ok = False
     doc_url = ""
 
@@ -326,27 +360,17 @@ def main():
 
         try:
             feishu = FeishuAPI()
-
-            # Message 1: Curated summaries
-            ok = feishu.send_group_message(
-                chat_id=feishu_cfg.get("chat_id", ""),
-                markdown_content=group_msg,
-            )
+            ok = True
+            for i, chunk in enumerate(chunks):
+                ok = feishu.send_group_message(
+                    chat_id=feishu_cfg.get("chat_id", ""),
+                    markdown_content=chunk,
+                )
+                if not ok:
+                    logger.error("❌ Message %d/%d failed", i + 1, len(chunks))
+                    break
             if ok:
-                logger.info("✅ Curated message sent")
-            else:
-                logger.error("❌ Curated message failed")
-
-            # Message 2: Appendix with all source links
-            appendix_ok = feishu.send_group_message(
-                chat_id=feishu_cfg.get("chat_id", ""),
-                markdown_content=appendix_msg,
-            )
-            if appendix_ok:
-                logger.info("✅ Appendix message sent")
-            else:
-                logger.warning("⚠️ Appendix message failed")
-
+                logger.info("✅ 全部 %d 条消息发送成功", len(chunks))
         except ValueError as e:
             logger.error("REST API init failed: %s", e)
             logger.warning(
@@ -357,15 +381,21 @@ def main():
             )
     else:
         # Local mode: use lark-cli
-        # Step A: Send group message
-        logger.info("Sending group message...")
+        logger.info("Sending group messages...")
         from output.feishu_send import send_group_message
 
-        ok, err = send_group_message(
-            markdown=group_msg,
-            chat_id=feishu_cfg.get("chat_id", ""),
-            as_bot=feishu_cfg.get("bot_as", "bot"),
-        )
+        ok = True
+        for i, chunk in enumerate(chunks):
+            ok, err = send_group_message(
+                markdown=chunk,
+                chat_id=feishu_cfg.get("chat_id", ""),
+                as_bot=feishu_cfg.get("bot_as", "bot"),
+            )
+            if not ok:
+                logger.error("❌ Message %d/%d failed: %s", i + 1, len(chunks), err)
+                break
+        if ok:
+            logger.info("✅ 全部 %d 条消息发送成功", len(chunks))
 
     if ok:
         logger.info("✅ Group message sent")

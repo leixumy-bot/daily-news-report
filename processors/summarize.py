@@ -22,8 +22,11 @@ SYSTEM_PROMPT = """你是一位 AI/Cloud 行业分析师，为一位从通信行
 
 {摘要正文}
 
-**来源：** [{来源名}]({来源 URL})
-**对 AI/Cloud GTM 的启示：** {启示内容}"""
+**原文链接：** [{来源名}]({原文 URL})
+**衍生链接：** [{标题1}]({url1}) · [{标题2}]({url2})
+**对 AI/Cloud GTM 的启示：** {启示内容}
+
+约束：衍生链接只能从提供的原始条目 URL 中选取，最多 2 条，禁止编造链接。"""
 
 
 def summarize_clusters(
@@ -112,13 +115,16 @@ def summarize_clusters(
 
 {first_title}
 
-**来源：** [{primary_source}]({primary_url})
+**原文链接：** [{primary_source}]({primary_url})
 **对 AI/Cloud GTM 的启示：** {relevance}"""
 
             summaries.append(
                 {
                     "topic": topic,
                     "priority": priority,
+                    "category": cluster.get("category", "其他"),
+                    "type": cluster.get("type", "新闻"),
+                    "_seq": cluster.get("_seq"),
                     "summary_text": raw,
                     "source": primary_source,
                     "url": primary_url,
