@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from utils.llm import LLMClient, LLMError
+from utils.validate import validate_clusters
 from collectors.base import NewsItem
 
 logger = logging.getLogger("dedup-cluster")
@@ -138,9 +139,9 @@ def _run_batch(llm: LLMClient, items: list[NewsItem]) -> list[dict]:
         )
         return _fallback_grouping(items)
 
-    clusters = parsed["clusters"]
-    if not isinstance(clusters, list) or len(clusters) == 0:
-        logger.warning("LLM Stage 1 returned empty clusters, using fallback")
+    clusters = validate_clusters(parsed["clusters"])
+    if not clusters:
+        logger.warning("LLM Stage 1 returned invalid clusters, using fallback")
         return _fallback_grouping(items)
 
     logger.info(

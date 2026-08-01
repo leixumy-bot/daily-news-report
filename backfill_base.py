@@ -10,6 +10,7 @@
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -79,7 +80,15 @@ def run_backfill(
         )
         parsed = llm.extract_json(raw)
         items = parsed.get("items") if parsed and isinstance(parsed.get("items"), list) else []
-        by_index = {it.get("index"): it for it in items if isinstance(it, dict)}
+        by_index = {}
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            try:
+                idx = int(it.get("index"))
+            except (TypeError, ValueError):
+                continue
+            by_index[idx] = it
 
         updates = []
         for idx, r in enumerate(batch):
@@ -119,10 +128,10 @@ def main():
 
     config = json.loads((HERE / "config.json").read_text(encoding="utf-8"))
     bitable = config.get("bitable", {})
-    app_token = bitable.get("app_token", "")
+    app_token = os.environ.get("LARK_BASE_TOKEN", "")
     table_id = bitable.get("table_id", "")
     if not app_token:
-        logger.error("bitable.app_token 未配置")
+        logger.error("LARK_BASE_TOKEN 环境变量未设置")
         sys.exit(1)
 
     batch_size = args.batch_size or bitable.get("backfill_batch_size", 20)

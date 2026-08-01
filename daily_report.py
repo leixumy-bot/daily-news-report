@@ -124,6 +124,22 @@ def parse_args():
 
 
 # ════════════════════════════════════════
+# Exit code
+# ════════════════════════════════════════
+def compute_exit_code(group_ok: bool, dry_run: bool) -> int:
+    """按「群消息是否全部发送成功」决定进程退出码。
+
+    - dry-run / collect-only 不推送，恒为 0（不把未推送算作失败）
+    - 群消息全部成功 → 0（多维表/知识库失败不影响退出码，已计入汇总告警，
+      避免 11:30 保底因非关键失败重复推送）
+    - 群消息未全部成功 → 1（workflow 不会写 .last_run，11:30 保底补跑）
+    """
+    if dry_run:
+        return 0
+    return 0 if group_ok else 1
+
+
+# ════════════════════════════════════════
 # Main
 # ════════════════════════════════════════
 def main():
@@ -351,6 +367,7 @@ def main():
 
     # ── Send to Feishu ──
     ok = False
+    err = ""
     doc_url = ""
 
     if is_ci():
@@ -400,17 +417,18 @@ def main():
     if ok:
         logger.info("✅ Group message sent")
     else:
-        logger.error("❌ Group message failed: %s", err if 'err' in dir() else "see above")
+        logger.error("❌ Group message failed: %s", err or "see logs above")
 
     # Step B: Write summaries to Base (多维表格留存)
     if ok:
         from output.feishu_base import save_summaries_to_base
         try:
             bitable_cfg = config.get("bitable", {})
+            # app_token 从环境变量 LARK_BASE_TOKEN 读取（config 不存凭证），
+            # 见 output/feishu_base.py save_summaries_to_base 的回退逻辑
             base_ok = save_summaries_to_base(
                 summaries=summaries,
                 date_str=report_date,
-                app_token=bitable_cfg.get("app_token", ""),
                 table_id=bitable_cfg.get("table_id", ""),
             )
             if base_ok:
@@ -472,6 +490,9 @@ def main():
         for e in errors:
             print(f"       - {e}")
     print("=" * 50)
+
+    # 群消息失败则任务失败，workflow 不写 .last_run（11:30 保底补跑）
+    sys.exit(compute_exit_code(ok, args.dry_run))
 
 
 def _send_empty_notification(config: dict):

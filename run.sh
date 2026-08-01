@@ -8,4 +8,10 @@ import json
 print(json.load(open('$HOME/.claude/settings.json'))['env']['ANTHROPIC_AUTH_TOKEN'])
 "
 )"
+export LARK_BASE_TOKEN="$(
+  /Users/xulei/venv/bin/python3 -c "
+import json
+print(json.load(open('$HOME/.claude/settings.json')).get('env', {}).get('LARK_BASE_TOKEN', ''))
+"
+)"
 exec /Users/xulei/venv/bin/python3 daily_report.py "$@"

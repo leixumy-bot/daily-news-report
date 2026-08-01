@@ -146,12 +146,11 @@
     "wiki_space_id": "my_library",
     "bot_as": "bot",
     "user_as": "user",
-    "bot_app_id": "cli_aae913b2d7f89cba",
     "max_post_bytes": 28000
   },
 
   "bitable": {
-    "app_token": "Jhi4bIOiia7K7asiinyc27PIn1c",
+    "app_token": "",
     "table_id": "tblwj7BApfF5hC3A",
     "backfill_batch_size": 20,
     "update_batch_size": 100
