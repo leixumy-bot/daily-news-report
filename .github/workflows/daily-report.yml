@@ -42,6 +42,9 @@ jobs:
   build-report:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # 允许 bot 提交 .last_run，避免日期标记只靠 cache（403 → git push 失败）
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
