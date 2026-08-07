@@ -17,6 +17,7 @@ import os
 import logging
 import sys
 import time
+import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -37,6 +38,12 @@ def now_bjt() -> datetime:
 
 def date_bjt() -> str:
     return now_bjt().strftime("%Y-%m-%d")
+
+
+def resolve_year_queries(queries: list[str], report_date: str) -> list[str]:
+    """Replace configured years with the report year at runtime."""
+    year = report_date[:4]
+    return [re.sub(r"\b20\d{2}\b", year, query) for query in queries]
 
 
 # ── Mode detection ──
@@ -98,6 +105,11 @@ def parse_args():
         "--force",
         action="store_true",
         help="Force run even if already ran today",
+    )
+    p.add_argument(
+        "--publish-local",
+        action="store_true",
+        help="本地运行时明确允许推送飞书；默认本地只生成预览",
     )
     p.add_argument(
         "--date",
@@ -167,8 +179,10 @@ def main():
 
     logger.info("=" * 50)
     logger.info("AI+Cloud 每日早报 — %s", report_date)
-    logger.info("args: dry_run=%s, force=%s, collect_only=%s",
-                args.dry_run, args.force, args.collect_only)
+    local_preview = not is_ci() and not args.publish_local
+    dry_run = args.dry_run or local_preview
+    logger.info("args: dry_run=%s, force=%s, collect_only=%s, publish_local=%s",
+                dry_run, args.force, args.collect_only, args.publish_local)
     logger.info("=" * 50)
 
     # ── 1. COLLECT ──
@@ -195,7 +209,7 @@ def main():
     if ws_cfg.get("enabled", True):
         collectors.append(
             WebSearchCollector(
-                ws_cfg.get("queries", []),
+                resolve_year_queries(ws_cfg.get("queries", []), report_date),
                 ws_cfg.get("max_results_per_query", 5),
             )
         )
@@ -207,6 +221,7 @@ def main():
             PodcastCollector(
                 pc_cfg.get("sources", []),
                 pc_cfg.get("max_results_per_source", 3),
+                year=int(report_date[:4]),
             )
         )
 
@@ -265,10 +280,14 @@ def main():
 
     if not relevant:
         logger.warning("No relevant items after keyword filter")
-        # Send notification about empty result
-        if not args.dry_run:
+        if not all_items or len(errors) == len(collectors):
+            if not dry_run:
+                _send_error_notification(config, "采集器全部失败，未生成日报")
+            sys.exit(1 if not dry_run else 0)
+        # Sources ran, but there is no relevant new material.
+        if not dry_run:
             _send_empty_notification(config)
-        return
+        sys.exit(0)
 
     # ── 2.5 Collect-only mode ──
     if args.collect_only:
@@ -283,15 +302,38 @@ def main():
     logger.info("[3/5] LLM 去重+聚类...")
     from utils.llm import LLMClient
     from processors.dedup_cluster import run_dedup_cluster
+    from utils.history import (
+        content_fingerprint,
+        filter_clusters_by_history,
+        load_recent_history,
+        topic_fingerprint,
+    )
 
     llm = LLMClient(config.get("llm", {}))
     clusters = run_dedup_cluster(llm, relevant)
 
+    # 历史主题去重：CI 正式运行查询飞书 Base，避免跨天重复推送。
+    history_cfg = config.get("bitable", {})
+    history = load_recent_history(
+        os.environ.get("LARK_BASE_TOKEN", ""),
+        history_cfg.get("table_id", ""),
+        days=history_cfg.get("dedup_days", 7),
+    )
+    history_dedup_applied = False
+    if history:
+        before = len(clusters)
+        clusters = filter_clusters_by_history(llm, clusters, history)
+        history_dedup_applied = True
+        logger.info("History dedup: %d → %d clusters", before, len(clusters))
+
     if not clusters:
-        logger.warning("No clusters generated — cannot proceed")
-        if not args.dry_run:
-            _send_error_notification(config, "未识别出任何话题簇")
-        return
+        logger.warning("No clusters remain after processing")
+        if not dry_run:
+            if history_dedup_applied:
+                _send_no_new_notification(config, report_date)
+            else:
+                _send_error_notification(config, "未识别出任何话题簇")
+        sys.exit(0)
 
     # Log clusters
     for c in clusters:
@@ -310,11 +352,18 @@ def main():
 
     summaries = summarize_clusters(llm, clusters_for_summary)
 
+    cluster_by_seq = {c.get("_seq"): c for c in clusters_for_summary}
+    for summary in summaries:
+        cluster = cluster_by_seq.get(summary.get("_seq"), {})
+        summary["content_fingerprint"] = content_fingerprint(cluster)
+        summary["topic_fingerprint"] = topic_fingerprint(cluster)
+        summary["first_push_date"] = summary.get("history_first_date", "")
+
     if not summaries:
         logger.warning("No summaries generated")
-        if not args.dry_run:
+        if not dry_run:
             _send_error_notification(config, "摘要生成失败")
-        return
+        sys.exit(1 if not dry_run else 0)
 
     for s in summaries:
         logger.info("  summary: [%d] %s (%s)",
@@ -352,7 +401,7 @@ def main():
     (output_dir / f"kb_doc_{report_date}.md").write_text(kb_doc, encoding="utf-8")
     logger.info("Outputs saved to %s", output_dir)
 
-    if args.dry_run:
+    if dry_run:
         logger.info("DRY RUN — skipping Feishu output")
         print("\n" + "=" * 50)
         print(f"📖 消息1（五层）共 {len(messages['five_layer'])} 段，首段预览:")
@@ -492,13 +541,11 @@ def main():
     print("=" * 50)
 
     # 群消息失败则任务失败，workflow 不写 .last_run（11:30 保底补跑）
-    sys.exit(compute_exit_code(ok, args.dry_run))
+    sys.exit(compute_exit_code(ok, dry_run))
 
 
 def _send_empty_notification(config: dict):
     """Send notification when no relevant news found."""
-    from output.feishu_send import send_group_message
-
     msg = (
         f"<at user_id=\"{config['feishu']['user_open_id']}\">"
         f"{config['feishu']['user_name']}</at>\n\n"
@@ -507,17 +554,11 @@ def _send_empty_notification(config: dict):
         f"来源正常运行中，请明天再查看。\n\n"
         f"_由 AI+Cloud News Digest 自动生成_"
     )
-    send_group_message(
-        markdown=msg,
-        chat_id=config["feishu"]["chat_id"],
-        as_bot=config["feishu"]["bot_as"],
-    )
+    _send_notification(config, msg)
 
 
 def _send_error_notification(config: dict, error_msg: str):
     """Send notification when processing fails."""
-    from output.feishu_send import send_group_message
-
     msg = (
         f"<at user_id=\"{config['feishu']['user_open_id']}\">"
         f"{config['feishu']['user_name']}</at>\n\n"
@@ -526,11 +567,41 @@ def _send_error_notification(config: dict, error_msg: str):
         f"错误：{error_msg}\n\n"
         f"请检查日志或重试。"
     )
-    send_group_message(
-        markdown=msg,
-        chat_id=config["feishu"]["chat_id"],
-        as_bot=config["feishu"]["bot_as"],
+    _send_notification(config, msg)
+
+
+def _send_no_new_notification(config: dict, report_date: str):
+    """Notify that the seven-day history filter found no meaningful new topic."""
+    msg = (
+        f"<at user_id=\"{config['feishu']['user_open_id']}\">"
+        f"{config['feishu']['user_name']}</at>\n\n"
+        f"# 🤖 AI+Cloud 每日早报 · {report_date}\n\n"
+        "近 7 天没有发现明确的新进展，今天不重复推送旧闻。"
     )
+    _send_notification(config, msg)
+
+
+def _send_notification(config: dict, markdown: str) -> bool:
+    """Send a short status message through the active runtime's transport."""
+    chat_id = config.get("feishu", {}).get("chat_id", "")
+    if not chat_id:
+        return False
+    if is_ci():
+        try:
+            from output.feishu_api import FeishuAPI
+            return FeishuAPI().send_group_message(chat_id=chat_id, markdown_content=markdown)
+        except Exception as e:
+            logging.getLogger("main").warning("CI Feishu notification failed: %s", e)
+            return False
+    from output.feishu_send import send_group_message
+    ok, err = send_group_message(
+        markdown=markdown,
+        chat_id=chat_id,
+        as_bot=config["feishu"].get("bot_as", "bot"),
+    )
+    if not ok and err:
+        logging.getLogger("main").warning("Feishu notification failed: %s", err)
+    return ok
 
 
 if __name__ == "__main__":

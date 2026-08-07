@@ -48,13 +48,15 @@ class BaseCollector(ABC):
 
         from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            fut = pool.submit(self.collect)
-            try:
-                items = fut.result(timeout=timeout)
-                return items, ""
-            except TimeoutError:
-                fut.cancel()
-                return [], f"[{self.name}] TIMEOUT after {timeout}s"
-            except Exception as e:
-                return [], f"[{self.name}] {type(e).__name__}: {str(e)[:200]}"
+        pool = ThreadPoolExecutor(max_workers=1)
+        fut = pool.submit(self.collect)
+        try:
+            items = fut.result(timeout=timeout)
+            return items, ""
+        except TimeoutError:
+            fut.cancel()
+            return [], f"[{self.name}] TIMEOUT after {timeout}s"
+        except Exception as e:
+            return [], f"[{self.name}] {type(e).__name__}: {str(e)[:200]}"
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)

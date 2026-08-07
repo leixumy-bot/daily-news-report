@@ -2,6 +2,8 @@
 
 import json
 import logging
+import re
+import unicodedata
 from typing import Any
 
 from utils.llm import LLMClient, LLMError
@@ -12,6 +14,13 @@ logger = logging.getLogger("dedup-cluster")
 
 # 单次 LLM 聚类处理的条目上限：条目过多时 LLM 生成会超时/失败，需分批
 BATCH_SIZE = 30
+
+
+def normalize_topic_key(topic: str) -> str:
+    """Normalize topic text for deterministic cross-batch deduplication."""
+    text = unicodedata.normalize("NFKC", topic or "").lower()
+    text = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", text)
+    return text
 
 SYSTEM_PROMPT = """你是 AI/Cloud 行业的专业新闻分析师。你的任务是对一组中文新闻条目进行去重和聚类。
 
@@ -78,14 +87,24 @@ def run_dedup_cluster(
         if clusters:
             all_clusters.extend(clusters)
 
-    # 跨批去重（按 topic 精确去重，保留 priority 高的）
+    # 跨批确定性去重：先按规范化 topic，再按相同首条 URL，保留 priority 高的。
     seen: set[str] = set()
+    seen_urls: set[str] = set()
     deduped: list[dict] = []
     for c in sorted(all_clusters, key=lambda c: c.get("priority", 0), reverse=True):
-        topic = c.get("topic", "")
-        if topic in seen:
+        topic = normalize_topic_key(c.get("topic", ""))
+        urls = {
+            item.get("url", "")
+            for item in c.get("items", [])
+            if isinstance(item, dict) and item.get("url")
+        }
+        if topic and topic in seen:
             continue
-        seen.add(topic)
+        if urls and urls & seen_urls:
+            continue
+        if topic:
+            seen.add(topic)
+        seen_urls.update(urls)
         deduped.append(c)
 
     logger.info(

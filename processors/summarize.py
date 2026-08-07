@@ -46,6 +46,7 @@ def summarize_clusters(
             topic = cluster.get("topic", "未命名话题")
             priority = cluster.get("priority", 3)
             relevance = cluster.get("relevance", "")
+            history_note = cluster.get("history_note", "")
             items = cluster.get("items", [])
 
             # Build items text
@@ -88,6 +89,11 @@ def summarize_clusters(
 原始条目（请基于这些内容撰写）：
 {items_text}
 
+近7天历史对照得到的新增进展（为空表示新主题）：
+{history_note or '无'}
+
+如果存在新增进展，请把摘要重点放在新增变化，旧背景只用一句话交代。
+
 请按指定格式输出。"""
 
             try:
@@ -129,6 +135,8 @@ def summarize_clusters(
                     "source": primary_source,
                     "url": primary_url,
                     "relevance": relevance,
+                    "history_note": history_note,
+                    "history_first_date": cluster.get("history_first_date", ""),
                 }
             )
         except Exception as e:

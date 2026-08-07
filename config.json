@@ -152,6 +152,7 @@
   "bitable": {
     "app_token": "",
     "table_id": "tblwj7BApfF5hC3A",
+    "dedup_days": 7,
     "backfill_batch_size": 20,
     "update_batch_size": 100
   },

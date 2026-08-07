@@ -63,7 +63,7 @@ export LARK_APP_SECRET="xxx"
 # 安装依赖
 pip install -r requirements.txt
 
-# 完整流程（采集→处理→推送）
+# 完整流程（采集→处理→推送；本地默认只预览）
 python3 daily_report.py
 
 # 只采集+处理，不推送
@@ -77,6 +77,12 @@ python3 daily_report.py --date 2026-07-24
 
 # 强制重跑（跳过今日已完成的检查）
 python3 daily_report.py --force
+
+# 本地明确允许推送（通常不需要，正式自动推送由 GitHub Actions 负责）
+python3 daily_report.py --publish-local
+
+本地不会自动推送日报；GitHub Actions 每天北京时间 09:30 主运行，11:30 仅在主运行未完成时补跑。
+日报会把近 7 天主题写入飞书多维表，过滤重复事件；只有明确新进展才会再次推送。
 ```
 
 ## 配置

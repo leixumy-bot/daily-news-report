@@ -39,11 +39,18 @@ class RSSCollector(BaseCollector):
         )
         resp.raise_for_status()
 
-        root = etree.fromstring(resp.content)
+        parser = etree.XMLParser(
+            recover=True,
+            resolve_entities=False,
+            no_network=True,
+            remove_comments=True,
+        )
+        root = etree.fromstring(resp.content, parser=parser)
 
         items: list[NewsItem] = []
-        # RSS items are typically under //channel/item
-        for entry in root.xpath("//item")[: self.max_items]:
+        # RSS uses item; Atom uses entry. Support both so Atom feeds are not silently empty.
+        entries = root.xpath("//item") or root.xpath("//*[local-name()='entry']")
+        for entry in entries[: self.max_items]:
             title_nodes = entry.xpath("title/text()")
             if not title_nodes:
                 continue
@@ -53,6 +60,9 @@ class RSSCollector(BaseCollector):
 
             # Link: handle CDATA and raw <link>
             raw_link = entry.xpath("string(link)").strip()
+            if not raw_link:
+                hrefs = entry.xpath("*[local-name()='link']/@href")
+                raw_link = (hrefs[0] if hrefs else "").strip()
 
             # Description: strip HTML tags
             desc = ""
@@ -74,6 +84,10 @@ class RSSCollector(BaseCollector):
                     ).strip()[:500]
 
             pub_date = (entry.xpath("pubDate/text()") or [""])[0].strip()
+            if not pub_date:
+                pub_date = (entry.xpath("*[local-name()='published']/text()") or [""])[0].strip()
+            if not pub_date:
+                pub_date = (entry.xpath("*[local-name()='updated']/text()") or [""])[0].strip()
 
             items.append(
                 NewsItem(

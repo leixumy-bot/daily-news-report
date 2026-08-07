@@ -10,10 +10,12 @@ logger = logging.getLogger("podcast")
 class PodcastCollector(BaseCollector):
     """Search for latest podcast episode show notes."""
 
-    def __init__(self, sources: list[str], max_per_source: int = 3):
+    def __init__(self, sources: list[str], max_per_source: int = 3, year: int | None = None):
         super().__init__("podcast")
         self.sources = sources
         self.max_per_source = max_per_source
+        from datetime import datetime
+        self.year = year or datetime.now().year
 
     def collect(self) -> list[NewsItem]:
         try:
@@ -25,7 +27,7 @@ class PodcastCollector(BaseCollector):
         items: list[NewsItem] = []
         with DDGS() as ddgs:
             for podcast in self.sources:
-                query = f"{podcast} show notes 2026 最新"
+                query = f"{podcast} show notes {self.year} 最新"
                 try:
                     results = list(
                         ddgs.text(

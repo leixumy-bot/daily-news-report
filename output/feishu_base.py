@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import re
-import time
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
@@ -17,6 +16,12 @@ logger = logging.getLogger("feishu-base")
 
 FEISHU_BASE = "https://open.feishu.cn/open-apis"
 BJT = timezone(timedelta(hours=8))
+
+
+def _date_timestamp_bjt(date_str: str) -> str:
+    """Return the canonical cell value for a Base datetime field."""
+    datetime.strptime(date_str, "%Y-%m-%d")
+    return f"{date_str} 00:00:00"
 
 
 def _field_date_bjt(value) -> str:
@@ -125,13 +130,13 @@ def _headers() -> dict:
 def _existing_records(
     app_token: str, table_id: str, date_str: str
 ) -> tuple[set[str], set[str]]:
-    """拉取指定日期的记录，返回 (话题标题集合, record_id 集合)。
+    """拉取指定日期的记录，返回 (话题标题集合, 内容指纹集合)。
 
     日期按字段值（秒/毫秒时间戳）解析成 BJT 日期比对，修复字符串匹配失效问题。
     """
-    records = search_records(app_token, table_id, field_names=["话题标题", "日期"])
+    records = search_records(app_token, table_id, field_names=["话题标题", "日期", "内容指纹"])
     topics: set[str] = set()
-    record_ids: set[str] = set()
+    content_fingerprints: set[str] = set()
     for r in records:
         fields = r.get("fields", {})
         if _field_date_bjt(fields.get("日期")) != date_str:
@@ -139,8 +144,10 @@ def _existing_records(
         topic = fields.get("话题标题", "")
         if topic:
             topics.add(topic)
-            record_ids.add(r.get("record_id", ""))
-    return topics, record_ids
+        content_fp = fields.get("内容指纹", "")
+        if content_fp:
+            content_fingerprints.add(content_fp)
+    return topics, content_fingerprints
 
 
 def save_summaries_to_base(
@@ -162,7 +169,7 @@ def save_summaries_to_base(
         return False
 
     # Check existing records for today
-    existing_topics, _ = _existing_records(app_token, table_id, date_str)
+    existing_topics, existing_content_fingerprints = _existing_records(app_token, table_id, date_str)
     if existing_topics:
         logger.info("Found %d existing topics for %s in Base", len(existing_topics), date_str)
 
@@ -181,9 +188,14 @@ def save_summaries_to_base(
         category = s.get("category", "其他")
         item_type = s.get("type", "新闻")
 
-        # Skip if already recorded for this date
-        if topic in existing_topics:
-            logger.info("  ⏭️  Skipped (already exists): %s", topic)
+        content_fp = s.get("content_fingerprint", "")
+        # 完全相同内容跳过；同主题但有新进展允许新增一条记录。
+        if content_fp and content_fp in existing_content_fingerprints:
+            logger.info("  ⏭️  Skipped (same content): %s", topic)
+            skipped_count += 1
+            continue
+        if not content_fp and topic in existing_topics:
+            logger.info("  ⏭️  Skipped (legacy topic): %s", topic)
             skipped_count += 1
             continue
 
@@ -193,13 +205,20 @@ def save_summaries_to_base(
         record = {
             "fields": {
                 "话题标题": topic,
-                "日期": int(time.mktime(time.strptime(f"{date_str} 00:00:00", "%Y-%m-%d %H:%M:%S"))),
+                "日期": _date_timestamp_bjt(date_str),
                 "优先级": priority,
                 "精读摘要": summary_text,
                 "来源": source,
                 "来源链接": source_link,
                 "分类": category,
                 "类型": item_type,
+                "内容指纹": s.get("content_fingerprint", ""),
+                "主题指纹": s.get("topic_fingerprint", ""),
+                "首次推送日期": _date_timestamp_bjt(s.get("first_push_date") or date_str),
+                "最后推送日期": _date_timestamp_bjt(date_str),
+                "进展摘要": s.get("history_note", ""),
+                "状态": "正常",
+                "记录来源": "daily_report",
             }
         }
 

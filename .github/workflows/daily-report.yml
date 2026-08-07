@@ -94,6 +94,10 @@ jobs:
           pip install -r requirements.txt
           pip install ddgs
 
+      - name: Run tests
+        if: steps.check.outputs.skip != 'true'
+        run: python -m pytest -q
+
       - name: Run daily report
         if: steps.check.outputs.skip != 'true'
         env:
@@ -133,7 +137,7 @@ jobs:
           python3 daily_report.py $ARGS
 
       - name: Mark today as completed
-        if: success() && steps.check.outputs.skip != 'true'
+        if: success() && steps.check.outputs.skip != 'true' && github.event.inputs.backfill_base != 'true' && (github.event_name != 'workflow_dispatch' || github.event.inputs.date == '')
         run: |
           TODAY=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
           echo "$TODAY" > .last_run
