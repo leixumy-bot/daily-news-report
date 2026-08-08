@@ -17,14 +17,26 @@ BJT = timezone(timedelta(hours=8))
 DECISIONS = {"new_topic", "new_progress", "duplicate", "uncertain"}
 
 
-def normalize_text(value: str) -> str:
-    text = (value or "").lower().strip()
+def normalize_text(value: Any) -> str:
+    if isinstance(value, dict):
+        value = " ".join(
+            str(value.get(key, ""))
+            for key in ("text", "title", "name", "value", "link", "url")
+            if value.get(key) is not None
+        ) or " ".join(str(item) for item in value.values())
+    elif isinstance(value, (list, tuple, set)):
+        value = " ".join(normalize_text(item) for item in value)
+    elif value is None:
+        value = ""
+    else:
+        value = str(value)
+    text = value.lower().strip()
     text = re.sub(r"https?://\S+", "", text)
     text = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", text)
     return text
 
 
-def fingerprint(*values: str) -> str:
+def fingerprint(*values: Any) -> str:
     payload = "|".join(normalize_text(v) for v in values if v)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
 
