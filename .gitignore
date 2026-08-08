@@ -5,4 +5,5 @@ cookies.json
 lark_auth_qr.png
 bin/xiaohongshu-mcp-darwin-arm64
 bin/xiaohongshu-login-darwin-arm64
+bin/wechatDownload.zip
 .env

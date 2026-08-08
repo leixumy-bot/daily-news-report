@@ -5,7 +5,6 @@
 """
 
 import re
-from typing import Any
 from datetime import datetime, timezone, timedelta
 
 from processors.categories import (
@@ -34,8 +33,10 @@ def today_bjt() -> str:
     return datetime.now(BJT).strftime("%Y-%m-%d")
 
 
-def today_bjt_cn() -> str:
+def today_bjt_cn(date_str: str = "") -> str:
     """Chinese date format."""
+    if date_str:
+        return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y年%m月%d日")
     return datetime.now(BJT).strftime("%Y年%m月%d日")
 
 
@@ -176,6 +177,16 @@ def _split_section(section: str, max_bytes: int) -> list[str]:
     def size(s: str) -> int:
         return len(s.encode("utf-8"))
 
+    def take_prefix(value: str, budget: int) -> tuple[str, str]:
+        used = 0
+        end = 0
+        for end, char in enumerate(value, 1):
+            size = len(char.encode("utf-8"))
+            if used + size > budget:
+                return value[: end - 1], value[end - 1 :]
+            used += size
+        return value, ""
+
     for part in parts:
         part = part.strip()
         if not part:
@@ -184,9 +195,11 @@ def _split_section(section: str, max_bytes: int) -> list[str]:
             result.append(buf)
             buf = ""
         if size(part) > max_bytes:
-            while part:  # 单段落仍超限：硬切（极罕见）
-                result.append(part[:max_bytes])
-                part = part[max_bytes:]
+            while part:  # 单段落仍超限：按 UTF-8 字节边界硬切
+                prefix, part = take_prefix(part, max_bytes)
+                if not prefix:
+                    raise ValueError("max_bytes is too small for one UTF-8 character")
+                result.append(prefix)
         else:
             buf = (buf + "\n---\n" + part) if buf else part
     if buf:
@@ -216,31 +229,39 @@ def split_markdown_by_bytes(sections: list[str], max_bytes: int) -> list[str]:
     if max_bytes <= 0 or not sections:
         return sections
 
-    chunks: list[str] = []
-    current = ""
-
     def size(s: str) -> int:
         return len(s.encode("utf-8"))
 
-    def emit_and_reset():
-        nonlocal current
-        if current.strip():
-            chunks.append(current)
-            current = ""
+    def pack(payload_limit: int) -> list[str]:
+        chunks: list[str] = []
+        current = ""
 
-    for section in sections:
-        ssize = size(section)
-        if current and size(current) + ssize + 1 > max_bytes:
-            emit_and_reset()
-        if ssize <= max_bytes:
-            current = (current + "\n" + section).strip() if current else section
-        else:
-            for sub in _split_section(section, max_bytes):
-                if current and size(current) + size(sub) + 1 > max_bytes:
+        def emit_and_reset():
+            nonlocal current
+            if current.strip():
+                chunks.append(current)
+                current = ""
+
+        for section in sections:
+            pieces = [section] if size(section) <= payload_limit else _split_section(section, payload_limit)
+            for piece in pieces:
+                if current and size(current) + size(piece) + 1 > payload_limit:
                     emit_and_reset()
-                current = (current + "\n" + sub).strip() if current else sub
-    emit_and_reset()
-    return _add_chunk_headers(chunks)
+                current = (current + "\n" + piece).strip() if current else piece
+        emit_and_reset()
+        return chunks
+
+    payload_limit = max_bytes
+    for _ in range(8):
+        raw_chunks = pack(payload_limit)
+        chunks = _add_chunk_headers(raw_chunks)
+        overflow = max((size(c) - max_bytes for c in chunks), default=0)
+        if overflow <= 0:
+            return chunks
+        payload_limit -= overflow
+        if payload_limit <= 0:
+            raise ValueError("max_bytes is too small to include the continuation header")
+    raise ValueError("could not split markdown within max_bytes")
 
 
 # ── 消息组装 ──
@@ -250,6 +271,7 @@ def build_messages(
     max_bytes: int = 28000,
     user_name: str = "徐磊",
     user_open_id: str = "",
+    date_str: str = "",
 ) -> dict[str, list[str]]:
     """组装两条逻辑消息：消息1=五层，消息2=政策+安全+其他+研报。
 
@@ -268,7 +290,8 @@ def build_messages(
     if user_open_id:
         msg1_lines.append(f'<at user_id="{user_open_id}">{user_name}</at>')
         msg1_lines.append("")
-    msg1_lines.append(f"# 🤖 AI+Cloud 每日早报 · {today_bjt_cn()}")
+    date_cn = today_bjt_cn(date_str)
+    msg1_lines.append(f"# 🤖 AI+Cloud 每日早报 · {date_cn}")
     msg1_lines.append("")
     msg1_header = "\n".join(msg1_lines)
     five_sections = [
@@ -278,7 +301,7 @@ def build_messages(
     five_chunks = split_markdown_by_bytes([msg1_header] + five_sections, max_bytes)
 
     # 消息2：政策+安全+其他+研报（研报空则整块隐藏）
-    msg2_header = f"# 📋 政策与安全板块 · {today_bjt_cn()}\n\n"
+    msg2_header = f"# 📋 政策与安全板块 · {date_cn}\n\n"
     policy_sections = [
         build_section(cat, summary_by_cat[cat], overflow_by_cat[cat])
         for cat in POLICY_SECURITY

@@ -1,8 +1,16 @@
 """Base data model and collector interface."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
+import multiprocessing as mp
+import queue
+
+
+def _collect_in_child(collector, result_queue):
+    try:
+        result_queue.put(("ok", collector.collect()))
+    except Exception as exc:
+        result_queue.put(("error", f"{type(exc).__name__}: {str(exc)[:200]}"))
 
 
 @dataclass
@@ -46,17 +54,29 @@ class BaseCollector(ABC):
             except Exception as e:
                 return [], f"[{self.name}] {type(e).__name__}: {str(e)[:200]}"
 
-        from concurrent.futures import ThreadPoolExecutor, TimeoutError
-
-        pool = ThreadPoolExecutor(max_workers=1)
-        fut = pool.submit(self.collect)
+        method = "fork" if "fork" in mp.get_all_start_methods() else "spawn"
+        context = mp.get_context(method)
+        result_queue = context.Queue(1)
+        process = context.Process(target=_collect_in_child, args=(self, result_queue), daemon=True)
+        process.start()
         try:
-            items = fut.result(timeout=timeout)
-            return items, ""
-        except TimeoutError:
-            fut.cancel()
-            return [], f"[{self.name}] TIMEOUT after {timeout}s"
+            process.join(timeout)
+            if process.is_alive():
+                process.terminate()
+                process.join(2)
+                return [], f"[{self.name}] TIMEOUT after {timeout}s"
+            try:
+                status, value = result_queue.get(timeout=1)
+            except queue.Empty:
+                return [], f"[{self.name}] worker exited without a result"
+            if status == "ok":
+                return value, ""
+            return [], f"[{self.name}] {value}"
         except Exception as e:
+            if process.is_alive():
+                process.terminate()
+                process.join(2)
             return [], f"[{self.name}] {type(e).__name__}: {str(e)[:200]}"
         finally:
-            pool.shutdown(wait=False, cancel_futures=True)
+            result_queue.close()
+            result_queue.join_thread()

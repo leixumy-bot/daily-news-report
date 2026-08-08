@@ -48,21 +48,23 @@ class FeishuAPI:
             "Content-Type": "application/json",
         }
 
-    def send_group_message(self, chat_id: str, markdown_content: str) -> bool:
+    def send_group_message(self, chat_id: str, markdown_content: str, uuid: str | None = None) -> bool:
         """Send post (rich text) message with links and formatting.
 
         长度切分已由 processors.format.split_markdown_by_bytes 在调用前完成，
         此处直接发送单条 markdown。
         """
         post = self._md_to_post(markdown_content)
-        return self._post_message(chat_id, post)
+        return self._post_message(chat_id, post, uuid=uuid)
 
-    def _post_message(self, chat_id: str, post: dict) -> bool:
+    def _post_message(self, chat_id: str, post: dict, uuid: str | None = None) -> bool:
         payload = {
             "receive_id": chat_id,
             "msg_type": "post",
             "content": json.dumps({"zh_cn": post}, ensure_ascii=False),
         }
+        if uuid:
+            payload["uuid"] = uuid
         resp = requests.post(
             f"{FEISHU_BASE}/im/v1/messages?receive_id_type=chat_id",
             headers=self._headers(),

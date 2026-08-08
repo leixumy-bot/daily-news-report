@@ -1,6 +1,6 @@
 # AI+Cloud 每日早报
 
-> 版本：v4.2 · 自动采集 → LLM 处理 → 飞书推送
+> 版本：v5.0 · 自动采集 → LLM 处理 → 飞书推送
 
 每日自动搜集 AI 与云计算领域的最新资讯，经 LLM 去重聚类、精读摘要后，推送飞书群聊并归档知识库。
 
@@ -40,6 +40,8 @@
 
 ### GitHub Actions（推荐）
 
+运行环境为 Python 3.13，依赖版本已固定在 `requirements*.txt`。
+
 配置 Repository Secrets：
 
 | Secret | 说明 |
@@ -50,7 +52,7 @@
 | `LARK_APP_SECRET` | 飞书自建应用 App Secret |
 | `LARK_BASE_TOKEN` | 飞书多维表格 Token |
 
-配置后自动生效。每天北京时间 09:30 和 11:30 各触发一次（双定时兜底，已跑过的自动跳过）。
+配置后自动生效。每天北京时间 09:00 和 09:45 各触发一次（双定时兜底，已跑过的自动跳过）。
 
 ### 本地运行
 
@@ -81,7 +83,7 @@ python3 daily_report.py --force
 # 本地明确允许推送（通常不需要，正式自动推送由 GitHub Actions 负责）
 python3 daily_report.py --publish-local
 
-本地不会自动推送日报；GitHub Actions 每天北京时间 09:30 主运行，11:30 仅在主运行未完成时补跑。
+本地不会自动推送日报；GitHub Actions 每天北京时间 09:00 主运行，09:45 仅在主运行未完成时补跑。
 日报会把近 7 天主题写入飞书多维表，过滤重复事件；只有明确新进展才会再次推送。
 ```
 

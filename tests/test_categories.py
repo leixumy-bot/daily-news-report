@@ -51,7 +51,7 @@ def test_select_for_summarize_caps_per_category():
             {"topic": f"研报-{i}", "priority": 5, "category": "模型", "type": RESEARCH}
         )
     sel = select_for_summarize(clusters, cap=24)
-    cnt = Counter(c["category"] for c in sel)
+    cnt = Counter(c["category"] for c in sel if c["type"] != RESEARCH)
     assert len(sel) <= 24
     for cat in ALL_CATEGORIES:
         assert cnt[cat] <= 3
@@ -72,3 +72,13 @@ def test_select_for_summarize_overflow_unmarked():
     assert "A" in selected_topics and "B" in selected_topics and "C" in selected_topics
     d = [c for c in clusters if c["topic"] == "D"][0]
     assert "_seq" not in d  # 溢出项不打 _seq
+
+
+def test_select_for_summarize_keeps_research_slot():
+    clusters = [
+        {"topic": f"{cat}-{i}", "priority": 1, "category": cat, "type": "新闻"}
+        for cat in ALL_CATEGORIES for i in range(3)
+    ]
+    clusters.append({"topic": "研报", "priority": 5, "category": "模型", "type": RESEARCH})
+    selected = select_for_summarize(clusters, cap=24)
+    assert any(c["topic"] == "研报" for c in selected)

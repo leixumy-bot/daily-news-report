@@ -2,8 +2,6 @@
 
 import logging
 
-from .feishu_common import run_lark, run_lark_safe
-
 logger = logging.getLogger("feishu-kb")
 
 

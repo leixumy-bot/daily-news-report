@@ -94,13 +94,13 @@ def select_for_summarize(
             cat = c["category"] if c["category"] in ALL_CATEGORIES else OTHER
             news_by_cat[cat].append(c)
 
+    research_selected = research[: min(RESEARCH_MAX, max(cap, 0))]
+    news_cap = max(cap - len(research_selected), 0)
     selected: list[dict] = []
     for cat in ALL_CATEGORIES:
         selected.extend(news_by_cat[cat][:MAX_PER_CATEGORY])
-    selected.extend(research[:RESEARCH_MAX])
-
-    if len(selected) > cap:
-        selected = selected[:cap]
+    selected = selected[:news_cap]
+    selected.extend(research_selected)
 
     for i, c in enumerate(selected):
         c["_seq"] = i

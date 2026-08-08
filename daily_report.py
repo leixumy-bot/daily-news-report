@@ -16,8 +16,9 @@ import json
 import os
 import logging
 import sys
-import time
 import re
+import uuid
+import hashlib
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -44,6 +45,31 @@ def resolve_year_queries(queries: list[str], report_date: str) -> list[str]:
     """Replace configured years with the report year at runtime."""
     year = report_date[:4]
     return [re.sub(r"\b20\d{2}\b", year, query) for query in queries]
+
+
+def validate_report_date(value: str) -> str:
+    """Validate and normalize a report date supplied by a user or workflow."""
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError("报告日期必须是 YYYY-MM-DD 格式") from exc
+    if parsed.strftime("%Y-%m-%d") != value:
+        raise ValueError("报告日期必须是有效的 YYYY-MM-DD 日期")
+    return value
+
+
+def message_uuid(
+    report_date: str,
+    stream: str,
+    index: int,
+    content: str = "",
+    manual: bool = False,
+) -> str:
+    """Stable UUID for scheduled retries; manual runs always get a fresh UUID."""
+    if manual:
+        return str(uuid.uuid4())
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:24]
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"daily-news-report:{report_date}:{stream}:{index}:{digest}"))
 
 
 # ── Mode detection ──
@@ -144,7 +170,7 @@ def compute_exit_code(group_ok: bool, dry_run: bool) -> int:
     - dry-run / collect-only 不推送，恒为 0（不把未推送算作失败）
     - 群消息全部成功 → 0（多维表/知识库失败不影响退出码，已计入汇总告警，
       避免 11:30 保底因非关键失败重复推送）
-    - 群消息未全部成功 → 1（workflow 不会写 .last_run，11:30 保底补跑）
+    - 群消息未全部成功 → 1（workflow 不会写 .last_run，09:45 保底补跑）
     """
     if dry_run:
         return 0
@@ -174,7 +200,11 @@ def main():
         sys.exit(1)
     config = load_config(config_path)
 
-    report_date = args.date or date_bjt()
+    try:
+        report_date = validate_report_date(args.date or date_bjt())
+    except ValueError as exc:
+        logger.error("Invalid report date: %s", exc)
+        sys.exit(2)
     report_title = f"AI+Cloud早报_{report_date.replace('-', '')}"
 
     logger.info("=" * 50)
@@ -282,11 +312,11 @@ def main():
         logger.warning("No relevant items after keyword filter")
         if not all_items or len(errors) == len(collectors):
             if not dry_run:
-                _send_error_notification(config, "采集器全部失败，未生成日报")
+                _send_error_notification(config, "采集器全部失败，未生成日报", report_date)
             sys.exit(1 if not dry_run else 0)
         # Sources ran, but there is no relevant new material.
         if not dry_run:
-            _send_empty_notification(config)
+            _send_empty_notification(config, report_date)
         sys.exit(0)
 
     # ── 2.5 Collect-only mode ──
@@ -332,7 +362,7 @@ def main():
             if history_dedup_applied:
                 _send_no_new_notification(config, report_date)
             else:
-                _send_error_notification(config, "未识别出任何话题簇")
+                _send_error_notification(config, "未识别出任何话题簇", report_date)
         sys.exit(0)
 
     # Log clusters
@@ -362,7 +392,7 @@ def main():
     if not summaries:
         logger.warning("No summaries generated")
         if not dry_run:
-            _send_error_notification(config, "摘要生成失败")
+            _send_error_notification(config, "摘要生成失败", report_date)
         sys.exit(1 if not dry_run else 0)
 
     for s in summaries:
@@ -382,6 +412,7 @@ def main():
         max_bytes=max_bytes,
         user_name=feishu_cfg.get("user_name", ""),
         user_open_id=feishu_cfg.get("user_open_id", ""),
+        date_str=report_date,
     )
     chunks = messages["five_layer"] + messages["policy_security"]
 
@@ -427,16 +458,28 @@ def main():
         try:
             feishu = FeishuAPI()
             ok = True
+            sent_count = 0
+            manual_run = os.environ.get("REPORT_RUN_MODE") == "workflow_dispatch" or args.force
             for i, chunk in enumerate(chunks):
+                stream = "five_layer" if i < len(messages["five_layer"]) else "policy_security"
+                stream_index = i if stream == "five_layer" else i - len(messages["five_layer"])
+                dedup_uuid = message_uuid(
+                    report_date, stream, stream_index, content=chunk, manual=manual_run
+                )
                 ok = feishu.send_group_message(
                     chat_id=feishu_cfg.get("chat_id", ""),
                     markdown_content=chunk,
+                    uuid=dedup_uuid,
                 )
                 if not ok:
-                    logger.error("❌ Message %d/%d failed", i + 1, len(chunks))
+                    logger.error("❌ Message %d/%d failed (sent=%d, uuid=%s)", i + 1, len(chunks), sent_count, dedup_uuid)
                     break
+                sent_count += 1
+                logger.info("✅ Message %d/%d sent (uuid=%s)", i + 1, len(chunks), dedup_uuid)
             if ok:
-                logger.info("✅ 全部 %d 条消息发送成功", len(chunks))
+                logger.info("✅ 全部 %d 条消息发送成功", sent_count)
+            else:
+                logger.error("⚠️ 部分发送：%d/%d 条消息成功", sent_count, len(chunks))
         except ValueError as e:
             logger.error("REST API init failed: %s", e)
             logger.warning(
@@ -540,16 +583,16 @@ def main():
             print(f"       - {e}")
     print("=" * 50)
 
-    # 群消息失败则任务失败，workflow 不写 .last_run（11:30 保底补跑）
+    # 群消息失败则任务失败，workflow 不写 .last_run（09:45 保底补跑）
     sys.exit(compute_exit_code(ok, dry_run))
 
 
-def _send_empty_notification(config: dict):
+def _send_empty_notification(config: dict, report_date: str = ""):
     """Send notification when no relevant news found."""
     msg = (
         f"<at user_id=\"{config['feishu']['user_open_id']}\">"
         f"{config['feishu']['user_name']}</at>\n\n"
-        f"# 🤖 AI+Cloud 每日早报 · {date_bjt()}\n\n"
+        f"# 🤖 AI+Cloud 每日早报 · {report_date or date_bjt()}\n\n"
         f"今日未采集到与 AI/Cloud 直接相关的新闻。\n"
         f"来源正常运行中，请明天再查看。\n\n"
         f"_由 AI+Cloud News Digest 自动生成_"
@@ -557,13 +600,13 @@ def _send_empty_notification(config: dict):
     _send_notification(config, msg)
 
 
-def _send_error_notification(config: dict, error_msg: str):
+def _send_error_notification(config: dict, error_msg: str, report_date: str = ""):
     """Send notification when processing fails."""
     msg = (
         f"<at user_id=\"{config['feishu']['user_open_id']}\">"
         f"{config['feishu']['user_name']}</at>\n\n"
         f"# ⚠️ AI+Cloud 早报处理异常\n\n"
-        f"日期：{date_bjt()}\n"
+        f"日期：{report_date or date_bjt()}\n"
         f"错误：{error_msg}\n\n"
         f"请检查日志或重试。"
     )

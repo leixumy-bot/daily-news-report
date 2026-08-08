@@ -81,6 +81,22 @@ def test_split_markdown_by_bytes_empty():
     assert split_markdown_by_bytes(["x"], 0) == ["x"]
 
 
+def test_split_markdown_by_bytes_respects_utf8_limit_and_preserves_content():
+    source = "中" * 1000
+    chunks = split_markdown_by_bytes([source], 100)
+    assert all(_size(chunk) <= 100 for chunk in chunks)
+    body = "".join(
+        chunk.replace("_（第 ", "\n_（第 ").split("# 📖 续读\n\n", 1)[-1]
+        for chunk in chunks
+    )
+    assert body == source
+
+
+def test_build_messages_uses_report_date():
+    msgs = build_messages([], [], max_bytes=100000, date_str="2026-01-02")
+    assert "2026年01月02日" in msgs["five_layer"][0]
+
+
 def test_build_kb_document():
     summaries, clusters = _fixture()
     kb = build_kb_document(summaries, clusters, "2026-07-31")
