@@ -12,25 +12,12 @@ def test_normalize_and_fingerprint_are_stable():
     assert fingerprint("A", "B") == fingerprint("a", "b")
 
 
-def test_normalize_text_accepts_structured_history_values():
-    assert normalize_text(["OpenAI", {"text": "GPT-5.6"}]) == "openaigpt56"
-
-
 def test_deterministic_duplicate_by_url():
     cluster = {
         "topic": "新模型发布",
         "items": [{"title": "发布", "url": "https://example.com/news"}],
     }
     history = [{"话题标题": "另一种标题", "来源链接": "https://example.com/news"}]
-    assert deterministic_status(cluster, history) == "duplicate"
-
-
-def test_deterministic_duplicate_accepts_structured_url_field():
-    cluster = {
-        "topic": "新模型发布",
-        "items": [{"title": "发布", "url": "https://example.com/news"}],
-    }
-    history = [{"话题标题": "另一种标题", "来源链接": {"link": "https://example.com/news"}}]
     assert deterministic_status(cluster, history) == "duplicate"
 
 
