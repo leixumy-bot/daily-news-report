@@ -21,6 +21,15 @@ def test_deterministic_duplicate_by_url():
     assert deterministic_status(cluster, history) == "duplicate"
 
 
+def test_deterministic_duplicate_accepts_structured_url_field():
+    cluster = {
+        "topic": "新模型发布",
+        "items": [{"title": "发布", "url": "https://example.com/news"}],
+    }
+    history = [{"话题标题": "另一种标题", "来源链接": {"link": "https://example.com/news"}}]
+    assert deterministic_status(cluster, history) == "duplicate"
+
+
 def test_topic_fingerprint_is_not_alone_a_duplicate():
     cluster = {
         "topic": "同一事件",

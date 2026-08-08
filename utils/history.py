@@ -104,6 +104,16 @@ def deterministic_status(cluster: dict, history: list[dict]) -> str | None:
         if current_content and row.get("内容指纹") == current_content:
             return "duplicate"
         old_url = row.get("来源链接", "")
+        if isinstance(old_url, dict):
+            old_url = old_url.get("link") or old_url.get("url") or old_url.get("text") or ""
+        elif isinstance(old_url, list):
+            old_url = " ".join(
+                str(item.get("link") or item.get("url") or item.get("text") or "")
+                if isinstance(item, dict) else str(item)
+                for item in old_url
+            )
+        elif not isinstance(old_url, str):
+            old_url = str(old_url or "")
         link_match = re.search(r"\]\((https?://[^)]+)\)", old_url or "")
         old_url = link_match.group(1) if link_match else old_url
         if old_url and old_url in current_urls:
