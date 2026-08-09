@@ -111,7 +111,104 @@ def run_dedup_cluster(
         "LLM Stage 1: %d clusters after %d batches (deduped from %d)",
         len(deduped), len(batches), len(all_clusters),
     )
+    # 确定性去重只处理"主题/URL 完全一致"；同一新闻跨渠道标题措辞不同时
+    # 仍需语义合并（宁合不拆），否则一天内会重复推送。
+    deduped = _semantic_merge_clusters(llm, deduped)
     return deduped
+
+
+def _semantic_merge_clusters(llm: LLMClient, clusters: list[dict]) -> list[dict]:
+    """跨批语义合并：把"同一事件但标题措辞不同"的簇合并（宁合不拆）。
+
+    用 n-gram 相似度预筛候选对（阈值 0.15，上限 120 对防超时），
+    再让 LLM 判断每对是否指同一事件。判为同一事件的把低优先级簇的
+    items 并入高优先级簇，删除被合并者。LLM 失败或不确定时不合并（安全降级）。
+    """
+    if len(clusters) < 2:
+        return clusters
+    from utils.history import similarity
+
+    topics = [c.get("topic", "") for c in clusters]
+    pairs = []
+    for i in range(len(clusters)):
+        for j in range(i + 1, len(clusters)):
+            score = similarity(topics[i], topics[j])
+            if score >= 0.15:
+                pairs.append({"keep": i, "drop": j, "score": round(score, 3)})
+    pairs.sort(key=lambda p: p["score"], reverse=True)
+    pairs = pairs[:120]
+    if not pairs:
+        return clusters
+
+    prompt_items = [
+        {"index": i, "topic": t, "priority": c.get("priority", 0)}
+        for i, (t, c) in enumerate(zip(topics, clusters))
+    ]
+    prompt = (
+        "以下是一组新闻话题簇，可能有多条描述同一事件。请判断候选配对中的两个簇"
+        "是否指同一事件（同一事件 = 核心主体、动作、结果相同，仅标题措辞或报道来源不同）。\n"
+        "换来源、换标题、换一种解读但核心事件相同 → 算同一事件（merge=true）；\n"
+        "不同事件（不同公司、不同产品、不同成果）→ 不算（merge=false）。\n"
+        "只输出 JSON：{\"merges\":[{\"keep_index\":0,\"drop_index\":1,\"merge\":true}]}\n\n"
+        f"话题簇：{json.dumps(prompt_items, ensure_ascii=False)}\n"
+        f"候选配对：{json.dumps(pairs, ensure_ascii=False)}"
+    )
+    try:
+        parsed = llm.extract_json(llm.messages_create(
+            system="你是严格的新闻事件去重审校员。不要把不同事件误判为同一事件。",
+            messages=[{"role": "user", "content": prompt}],
+        ))
+    except Exception:
+        logger.warning("Semantic cross-batch merge failed, keeping all clusters")
+        return clusters
+
+    if not parsed or not isinstance(parsed.get("merges"), list):
+        return clusters
+
+    merges: dict[int, list[int]] = {}
+    drop_set: set[int] = set()
+    for m in parsed["merges"]:
+        if not isinstance(m, dict) or m.get("merge") is not True:
+            continue
+        try:
+            keep, drop = int(m.get("keep_index")), int(m.get("drop_index"))
+        except (TypeError, ValueError):
+            continue
+        if keep == drop or keep < 0 or keep >= len(clusters) or drop < 0 or drop >= len(clusters):
+            continue
+        merges.setdefault(keep, []).append(drop)
+        drop_set.add(drop)
+
+    if not drop_set:
+        return clusters
+
+    result = []
+    seen_urls: set[str] = set()
+    for i, c in enumerate(clusters):
+        if i in drop_set:
+            continue
+        merged_items = []
+        for item in c.get("items", []):
+            url = item.get("url", "") if isinstance(item, dict) else ""
+            if url and url in seen_urls:
+                continue
+            merged_items.append(item)
+            if url:
+                seen_urls.add(url)
+        for drop in merges.get(i, []):
+            for item in clusters[drop].get("items", []):
+                url = item.get("url", "") if isinstance(item, dict) else ""
+                if url and url in seen_urls:
+                    continue
+                merged_items.append(item)
+                if url:
+                    seen_urls.add(url)
+        merged = dict(c)
+        merged["items"] = merged_items
+        result.append(merged)
+
+    logger.info("Semantic cross-batch merge: %d → %d clusters", len(clusters), len(result))
+    return result
 
 
 def _run_batch(llm: LLMClient, items: list[NewsItem]) -> list[dict]:

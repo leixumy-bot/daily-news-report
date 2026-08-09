@@ -78,6 +78,46 @@ def is_ci() -> bool:
     return os.environ.get("CI") == "true"
 
 
+def _mark_done_in_ci(report_date: str) -> bool:
+    """CI 下群消息全部成功后立即标记 .last_run 并 push，不等 workflow 收尾。
+
+    这是防重复推送的关键：主推送一旦成功就视为"今天已完成"，
+    避免"消息已推送但 job 后续步骤（Base/KB）超时或失败导致 .last_run 没写、
+    09:45 保底误判而重复推送"。push 失败只告警，不影响主流程退出码
+    （9:45 保底还有 .last_run + 飞书 uuid 双保险兜底）。
+    """
+    if not is_ci():
+        return True
+    logger = logging.getLogger("main")
+    marker = HERE / ".last_run"
+    try:
+        marker.write_text(report_date + "\n", encoding="utf-8")
+    except OSError as e:
+        logger.error("❌ 写 .last_run 失败: %s", e)
+        return False
+    import subprocess
+
+    def run(cmd):
+        r = subprocess.run(cmd, cwd=str(HERE), capture_output=True, text=True)
+        if r.returncode != 0:
+            logger.warning(
+                "git %s 返回 %d: %s", cmd[0], r.returncode,
+                (r.stderr or r.stdout).strip()[:200],
+            )
+        return r
+
+    run(["git", "config", "user.name", "daily-report-bot"])
+    run(["git", "config", "user.email", "bot@leixumy-bot.users.github.com"])
+    # 仅当 .last_run 有实际变更时才 commit，避免每次产生空提交
+    changed = run(["git", "status", "--porcelain", ".last_run"]).stdout.strip() != ""
+    if changed:
+        run(["git", "add", ".last_run"])
+        run(["git", "commit", "-m", f"chore: mark report done for {report_date}"])
+    run(["git", "push"])
+    logger.info("✅ 已标记 .last_run = %s（推送成功后立即写）", report_date)
+    return True
+
+
 # ── Logging ──
 def setup_logging(verbose: bool = False):
     level = logging.DEBUG if verbose else logging.INFO
@@ -508,6 +548,9 @@ def main():
 
     if ok:
         logger.info("✅ Group message sent")
+        # 推送全部成功 → 立即标记今日已完成（不等 workflow 收尾），
+        # 防止后续步骤（Base/KB）超时或失败导致 .last_run 没写、09:45 保底重复推送
+        _mark_done_in_ci(report_date)
     else:
         logger.error("❌ Group message failed: %s", err or "see logs above")
 

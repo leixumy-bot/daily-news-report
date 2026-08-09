@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from utils.llm import LLMClient, LLMError
+from utils.history import content_fingerprint as _content_fp, topic_fingerprint as _topic_fp
 
 logger = logging.getLogger("summarize")
 
@@ -137,6 +138,9 @@ def summarize_clusters(
                     "relevance": relevance,
                     "history_note": history_note,
                     "history_first_date": cluster.get("history_first_date", ""),
+                    # 指纹写入 Base，供下次 history.py deterministic_status 跨天去重比对
+                    "content_fingerprint": _content_fp(cluster),
+                    "topic_fingerprint": _topic_fp(cluster),
                 }
             )
         except Exception as e:

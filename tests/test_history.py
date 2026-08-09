@@ -5,6 +5,7 @@ from utils.history import (
     fingerprint,
     normalize_text,
 )
+from output.feishu_base import _date_timestamp_bjt, _field_date_bjt
 
 
 def test_normalize_and_fingerprint_are_stable():
@@ -35,3 +36,10 @@ def test_semantic_candidate_is_created_for_similar_topics():
     history = [{"话题标题": "OpenAI 新模型发布", "date_str": "2026-08-05"}]
     pairs = build_semantic_pairs(clusters, history, threshold=0.1)
     assert pairs and pairs[0]["current_index"] == 0
+
+
+def test_date_timestamp_bjt_is_int_and_roundtrips():
+    """Base 日期字段必须是时间戳（字符串会被拒），且能 roundtrip 回同一天。"""
+    ts = _date_timestamp_bjt("2026-08-09")
+    assert isinstance(ts, int)
+    assert _field_date_bjt(ts) == "2026-08-09"

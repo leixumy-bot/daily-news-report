@@ -18,10 +18,15 @@ FEISHU_BASE = "https://open.feishu.cn/open-apis"
 BJT = timezone(timedelta(hours=8))
 
 
-def _date_timestamp_bjt(date_str: str) -> str:
-    """Return the canonical cell value for a Base datetime field."""
-    datetime.strptime(date_str, "%Y-%m-%d")
-    return f"{date_str} 00:00:00"
+def _date_timestamp_bjt(date_str: str) -> int:
+    """Return the canonical cell value for a Base datetime field.
+
+    多维表格日期字段接受秒级时间戳，不接受 "YYYY-MM-DD HH:MM:SS" 字符串
+    （v4.0 曾改为字符串导致 DatetimeFieldConvFail、历史记录全部写不进去）。
+    用 BJT 0 点的时间戳，避免 CI（UTC）与本地时区差异导致跨天偏移。
+    """
+    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=BJT)
+    return int(dt.timestamp())
 
 
 def _field_date_bjt(value) -> str:
