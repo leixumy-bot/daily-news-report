@@ -1,6 +1,6 @@
 # 踩坑记录 / Troubleshooting
 
-本文件记录 v3.x 改造过程中踩过的坑、根因和解决方案，供后续维护参考。
+本文件记录 v3.x ~ v5.x 改造过程中踩过的坑、根因和解决方案，供后续维护参考。
 
 ## 1. LLM 聚类超时：200+ 条一次喂给 LLM 必失败
 
@@ -56,5 +56,29 @@
 ## 10. CI 里 git push 报 403
 
 - **症状**：workflow 的 "Mark today as completed" 步骤 `git push` 报 403。
-- **原因**：Actions token 无仓库写权限（沿用 v2 的配置，非本次改版引入）。
-- **影响**：无。`.last_run` 幂等标志靠 Actions Cache 兜底，不依赖 git push 成功。
+- **原因**：Actions token 无仓库写权限。需在 workflow 的 job 上声明 `permissions: contents: write`（v4.0 已加）。
+- **影响**：push 失败仅告警，非致命——`.last_run` 幂等标志由脚本内 git 提交承载，workflow 收尾步骤的 push 只是兜底。
+
+## 11. 跨天去重失效：Base 历史记录写不进去（DatetimeFieldConvFail）
+
+- **症状**：`feishu-base: Failed to insert record for '...': DatetimeFieldConvFail`，`Base write done: 0 inserted`；跨天去重只剩残缺历史，同一事件隔天重复推送。
+- **原因**：v4.0 把 `_date_timestamp_bjt` 从"秒级时间戳"（`int(time.mktime(...))`）误改成字符串 `"YYYY-MM-DD 00:00:00"`。多维表格**日期**字段只接受时间戳，字符串被拒。此 bug 从 v4.0 起一直静默存在（08-07 起 0 inserted），直到 08-09 追查内容重复才定位。
+- **解决**：`output/feishu_base.py` `_date_timestamp_bjt` 改回 BJT 秒级时间戳（`datetime.strptime(...).replace(tzinfo=BJT).timestamp()`），v5.5 修复。注意：修复后**新**记录才带指纹，旧记录（v4.0 前）无指纹字段，跨天去重靠 URL 匹配 + LLM 语义判断兜底，需数天累积才完全恢复。
+
+## 12. 飞书 uuid 去重窗口是 1 小时
+
+- **症状**：双定时两次 run 都推送了消息（今天 2 条 + 3 条），uuid 去重没拦住。
+- **原因**：飞书规则是"相同 uuid 在 **1 小时内**至多发送一条"。两次 run 间隔 >1 小时时 uuid 去重失效；且 v5.0 的 uuid 基于消息内容 sha256，两次内容不同 → uuid 不同 → 去重必然失效。
+- **解决**：根治靠"推送成功后脚本内立即写 `.last_run`"（v5.5），把"推了"和"标记完成"绑死；保底 cron 09:45 与主推 09:00 间隔 45 分钟（< 1 小时），落在 uuid 去重窗口内。uuid 内容摘要设计本身不再作为去重主依赖。
+
+## 13. 同一新闻跨渠道重复：跨批只做"完全一致"去重
+
+- **症状**：同一天报告里，同一事件（多家公众号/站点报道）重复出现；`LLM Stage 1: 71 → 70`（只去掉 1 个）。
+- **原因**：`run_dedup_cluster` 分批（30 条/批）LLM 聚类后，跨批只按"topic 完全一致 / URL 完全一致"确定性去重。同一事件不同渠道标题措辞不同、URL 不同，两规则都不命中 → 不合并。
+- **解决**：v5.5 新增跨批 LLM 语义合并（`_semantic_merge_clusters`）：n-gram 相似度预筛候选对（阈值 0.15，上限 120 对防超时）→ LLM 判断是否同一事件 → 合并。LLM 失败时安全降级不合并。
+
+## 14. 双定时并行 run：主推成功后 job 才被杀 → 重复推送
+
+- **症状**：09:00 主 run 推送成功后，job 在 Base/知识库收尾阶段撞超时被杀 → job 失败 → `.last_run` 没写 → 09:45 保底误判"今天没推"又推一遍。
+- **原因**：`.last_run` 只在 workflow 末尾 "Mark today as completed"（条件是整个 job `success()`）才写；从"消息推送成功"到"job 收尾"之间存在窗口，此窗口内 job 挂掉就丢标记。v5.0 把双定时间隔缩到 45 分钟但超时仍是 30 分钟，而 LLM 阶段耗时增长（今天聚类 19 分钟 + 多次 retry），正好踩雷。
+- **解决**：v5.5 双保险——① 脚本内消息全部发送成功后**立即**写 `.last_run` 并 push（`daily_report.py _mark_done_in_ci`），不等 workflow 收尾；② `timeout-minutes` 30 → 60 给足运行时长。
